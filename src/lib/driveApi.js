@@ -64,21 +64,33 @@ export async function deleteFile(fileId) {
   if (!res.ok && res.status !== 204) throw new Error(`Drive DELETE ${res.status}`);
 }
 
-// Replace a file's content with new JSON
+// Replace a file's content with new JSON (resumable upload avoids CORS preflight issues with PATCH)
 export async function updateJsonFile(fileId, data) {
   const token = getAccessToken();
   if (!token) throw new Error('Not authenticated');
   const body = JSON.stringify(data);
-  const res = await fetch(`${UPLOAD_API}/files/${fileId}?uploadType=media`, {
+  const blob = new Blob([body], { type: 'application/json' });
+
+  const initRes = await fetch(`${UPLOAD_API}/files/${fileId}?uploadType=resumable`, {
     method: 'PATCH',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'X-Upload-Content-Type': 'application/json',
+      'X-Upload-Content-Length': String(blob.size),
     },
-    body,
+    body: '{}',
   });
-  if (!res.ok) throw new Error(`Drive PATCH JSON ${res.status}`);
-  return res.json();
+  if (!initRes.ok) throw new Error(`Drive initiate update ${initRes.status}`);
+  const uploadUrl = initRes.headers.get('Location');
+
+  const uploadRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: blob,
+  });
+  if (!uploadRes.ok) throw new Error(`Drive update PUT ${uploadRes.status}`);
+  return uploadRes.json();
 }
 
 export async function downloadJsonFile(fileId) {

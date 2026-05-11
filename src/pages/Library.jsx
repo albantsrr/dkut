@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Epub from 'epubjs';
-import { getAllBooks, saveBook, deleteBook } from '../utils/storage.js';
+import { getAllBooks, saveBook, deleteBook, syncLibrary } from '../utils/storage.js';
 import { getAllProgress, clearProgress } from '../lib/progress.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import styles from './Library.module.css';
@@ -63,6 +63,7 @@ export default function Library() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [fetchError, setFetchError] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
@@ -115,6 +116,21 @@ export default function Library() {
     }
   };
 
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const added = await syncLibrary();
+      const [b, p] = await Promise.all([getAllBooks(), getAllProgress().catch(() => ({}))]);
+      setBooks(b);
+      setProgressMap(p);
+      if (added === 0) alert('Already up to date — no new books found in Drive.');
+    } catch (err) {
+      alert(`Sync failed: ${err.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
   const handleRestart = (e, id) => {
     e.stopPropagation();
     clearProgress(id).catch(console.error);
@@ -139,6 +155,9 @@ export default function Library() {
             <img src={user.picture} alt={user.name} className={styles.avatar} referrerPolicy="no-referrer" />
           )}
           <span className={styles.userEmail}>{user?.email}</span>
+          <button className={styles.syncBtn} onClick={handleSync} disabled={syncing} title="Scan Drive for unregistered EPUBs">
+            {syncing ? 'Syncing…' : '↻ Sync Drive'}
+          </button>
           <button className={styles.signOutBtn} onClick={signOut}>Sign out</button>
         </div>
       </header>

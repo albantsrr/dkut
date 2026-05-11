@@ -95,14 +95,73 @@ export async function getBook(id) {
 }
 
 // Returns all books without the data (ArrayBuffer) field — only metadata + cached cover.
+// Silently deduplicates by title+author, keeping the entry with the most recent addedAt.
 export async function getAllBooks() {
   const driveData = await loadData();
+
+  const seen = new Map();
+  for (const book of driveData.books) {
+    const key = `${book.title}\0${book.author}`;
+    const existing = seen.get(key);
+    if (!existing || book.addedAt > existing.addedAt) seen.set(key, book);
+  }
+  const deduped = Array.from(seen.values());
+
+  if (deduped.length !== driveData.books.length) {
+    driveData.books = deduped;
+    saveData(driveData).catch(() => {});
+  }
+
   return Promise.all(
-    driveData.books.map(async (meta) => ({
+    deduped.map(async (meta) => ({
       ...meta,
       cover: await getCachedCover(meta.id),
     }))
   );
+}
+
+// Scans dkut/library/ on Drive and registers any EPUB not already in bibliotheque-data.json.
+// Returns the number of newly registered books.
+export async function syncLibrary() {
+  const folderId = await getLibraryFolderId();
+  const driveData = await loadData();
+  const knownIds = new Set(driveData.books.map((b) => b.id));
+
+  const files = await (await import('../lib/driveApi.js')).listFiles(
+    folderId,
+    `mimeType='application/epub+zip' or name contains '.epub'`
+  );
+
+  let added = 0;
+  for (const file of files) {
+    if (knownIds.has(file.id)) continue;
+
+    let data;
+    try { data = await downloadFile(file.id); } catch { continue; }
+
+    await cacheEpub(file.id, data);
+
+    let title = file.name.replace(/[-_]\d+\.epub$/i, '').replace(/\.epub$/i, '') || 'Untitled';
+    let author = 'Unknown author';
+    try {
+      const meta = await new Promise((resolve) => {
+        const book = Epub(data.slice(0));
+        // Only load metadata — never call coverUrl() which triggers the rendering pipeline
+        book.loaded.metadata.then((m) => {
+          book.destroy();
+          resolve({ title: m.title || title, author: m.creator || author });
+        }).catch(() => { book.destroy(); resolve({ title, author }); });
+      });
+      title = meta.title;
+      author = meta.author;
+    } catch { /* keep filename-derived title */ }
+
+    driveData.books.push({ id: file.id, title, author, addedAt: Date.now() });
+    added++;
+  }
+
+  if (added > 0) await saveData(driveData);
+  return added;
 }
 
 export async function deleteBook(id) {
