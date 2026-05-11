@@ -1,0 +1,344 @@
+/* ── Chat Drawer ── */
+.drawer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 50vh;
+  min-height: 320px;
+  max-height: 70vh;
+  z-index: 60;
+  border-top: 1px solid;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.drawerOpen {
+  transform: translateY(0);
+}
+
+/* Header */
+.drawerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid;
+  flex-shrink: 0;
+}
+
+.drawerTitle {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.clearBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.48rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.4rem;
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.clearBtn:hover {
+  opacity: 0.8;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.3rem;
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+  line-height: 1;
+}
+
+.closeBtn:hover {
+  opacity: 1;
+}
+
+/* Messages area */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.9rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 169, 110, 0.2) transparent;
+}
+
+.messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: rgba(200, 169, 110, 0.2);
+  border-radius: 2px;
+}
+
+/* Empty state */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.75rem 0;
+  margin-top: 0.5rem;
+}
+
+.emptyHint {
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+  opacity: 0.35;
+}
+
+.suggestedBtn {
+  background: none;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-style: italic;
+  transition: background 0.15s ease, opacity 0.15s ease;
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+  opacity: 0.65;
+}
+
+.suggestedBtn:hover {
+  opacity: 1;
+  background: rgba(200, 169, 110, 0.07);
+}
+
+/* Message bubbles */
+.message {
+  max-width: 82%;
+  padding: 0.55rem 0.85rem;
+  border-radius: 3px;
+  position: relative;
+}
+
+.message p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.855rem;
+  line-height: 1.68;
+  white-space: pre-wrap;
+}
+
+.userMsg {
+  align-self: flex-end;
+  background: rgba(200, 169, 110, 0.10);
+  border: 1px solid rgba(200, 169, 110, 0.20);
+}
+
+.assistantMsg {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* Blinking cursor during streaming */
+.cursor {
+  display: inline-block;
+  width: 1.5px;
+  height: 0.95em;
+  background: #c8a96e;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.9s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Page separator */
+.separator {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.1rem 0;
+  flex-shrink: 0;
+}
+
+.separator::before,
+.separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.1;
+}
+
+.separator span {
+  font-family: var(--font-mono);
+  font-size: 0.48rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.3;
+}
+
+/* Error banner */
+.errorBanner {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  color: #e07070;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(224, 112, 112, 0.25);
+  border-radius: 2px;
+  background: rgba(224, 112, 112, 0.06);
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+/* Input area */
+.inputArea {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  border-top: 1px solid;
+  flex-shrink: 0;
+}
+
+.textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-style: italic;
+  line-height: 1.55;
+  max-height: 6rem;
+  overflow-y: auto;
+  padding: 0.2rem 0;
+  background: transparent;
+  scrollbar-width: thin;
+}
+
+.textarea::placeholder {
+  opacity: 0.28;
+}
+
+.sendBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+  color: #c8a96e;
+}
+
+.sendBtn:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.sendBtn:not(:disabled):hover {
+  opacity: 0.7;
+}
+
+.loadingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c8a96e;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* Revision sheet */
+.revisionSheet {
+  align-self: stretch;
+  border-left: 2px solid;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0 3px 3px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  border-top: 1px solid rgba(200, 169, 110, 0.15);
+  border-right: 1px solid rgba(200, 169, 110, 0.08);
+  border-bottom: 1px solid rgba(200, 169, 110, 0.08);
+}
+
+.revisionTitle {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.revisionContent {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  line-height: 1.72;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.saveSheetBtn {
+  align-self: flex-end;
+  background: none;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.saveSheetBtn:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(200, 169, 110, 0.07);
+}
+
+.saveSheetBtn:disabled {
+  cursor: default;
+}

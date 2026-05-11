@@ -1,0 +1,67 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg:           #0d0b09;
+  --bg-elevated:  #161210;
+  --bg-card:      #1c1816;
+  --bg-card-hover:#221f1c;
+  --gold:         #c8a96e;
+  --gold-dim:     #7a6435;
+  --gold-light:   #e8d5b0;
+  --gold-faint:   rgba(200, 169, 110, 0.08);
+  --cream:        #f0e6d3;
+  --text-primary: #ddd0bc;
+  --text-secondary: #7a6e66;
+  --text-muted:   #3d3530;
+  --border:       #252018;
+  --border-gold:  rgba(200, 169, 110, 0.18);
+  --shadow:       0 8px 48px rgba(0, 0, 0, 0.6);
+  --shadow-card:  0 2px 16px rgba(0, 0, 0, 0.4);
+
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-body:    'Libre Baskerville', Georgia, serif;
+  --font-mono:    'Space Mono', monospace;
+}
+
+html, body, #root {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Grain texture overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold-dim); }
+
+/* Utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+}
