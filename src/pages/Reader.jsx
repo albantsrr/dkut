@@ -214,10 +214,13 @@ export default function Reader() {
       await rendition.display(saved || undefined);
       if (!cancelled) setReady(true);
 
+      // Capture position before generate() navigates internally through the whole book
+      const preCfi = renditionRef.current?.currentLocation()?.start?.cfi ?? null;
       await book.locations.generate(1600);
 
-      // Re-save with correct percentage now that locations are available
       if (!cancelled && renditionRef.current) {
+        // generate() leaves the view at the wrong position — restore it
+        if (preCfi) await renditionRef.current.display(preCfi);
         const loc = renditionRef.current.currentLocation();
         if (loc?.start?.cfi && book.locations.length()) {
           const pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100);
