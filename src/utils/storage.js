@@ -165,7 +165,8 @@ export async function syncLibrary() {
 }
 
 export async function deleteBook(id) {
-  await deleteFile(id);
+  // Ignore Drive errors — file may already be gone (404) or inaccessible (403)
+  await deleteFile(id).catch(() => {});
   await evictBook(id);
 
   const driveData = await loadData();
