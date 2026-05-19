@@ -489,6 +489,32 @@ export default function Reader() {
         >
           ›
         </button>
+
+        {/* Mobile tap zones — always present, invisible */}
+        {!showChat && (
+          <div className={styles.tapZones} aria-hidden="true">
+            <div
+              className={styles.tapZoneLeft}
+              onClick={(e) => { e.stopPropagation(); renditionRef.current?.prev(); }}
+            />
+            <div
+              className={styles.tapZoneCenter}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (showChrome) {
+                  clearTimeout(hideTimer.current);
+                  setShowChrome(false);
+                } else {
+                  resetHideTimer();
+                }
+              }}
+            />
+            <div
+              className={styles.tapZoneRight}
+              onClick={(e) => { e.stopPropagation(); renditionRef.current?.next(); }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Bottom bar */}

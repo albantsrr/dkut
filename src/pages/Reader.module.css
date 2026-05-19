@@ -162,6 +162,33 @@
 .navPrev { left: 0; }
 .navNext { right: 0; }
 
+/* ── Mobile tap zones ── */
+.tapZones {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.tapZoneLeft,
+.tapZoneCenter,
+.tapZoneRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+.tapZoneLeft  { left: 0;   width: 30%; }
+.tapZoneCenter { left: 30%; width: 40%; }
+.tapZoneRight { right: 0;  width: 30%; }
+
+@media (pointer: coarse) {
+  .tapZones { display: flex; }
+  .navArrow { display: none; }
+}
+
 /* ── Bottom bar ── */
 .bottomBar {
   position: absolute;
