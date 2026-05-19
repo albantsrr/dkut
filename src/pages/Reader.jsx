@@ -105,6 +105,7 @@ export default function Reader() {
   const hideTimer = useRef(null);
   const targetLangRef = useRef('');
   const pageTextRef = useRef('');
+  const locationsReadyRef = useRef(false);
 
   const applyTheme = useCallback((rendition, t, size) => {
     const th = THEMES[t];
@@ -212,30 +213,16 @@ export default function Reader() {
       if (cancelled) { book.destroy(); return; }
       const saved = await getProgress(id);
       await rendition.display(saved || undefined);
-      if (!cancelled) setReady(true);
-
-      // Capture position before generate() navigates internally through the whole book
-      const preCfi = renditionRef.current?.currentLocation()?.start?.cfi ?? null;
-      await book.locations.generate(1600);
-
-      if (!cancelled && renditionRef.current) {
-        // generate() leaves the view at the wrong position — restore it
-        if (preCfi) await renditionRef.current.display(preCfi);
-        const loc = renditionRef.current.currentLocation();
-        if (loc?.start?.cfi && book.locations.length()) {
-          const pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100);
-          setProgress(pct);
-          saveProgress(id, loc.start.cfi, pct);
-        }
-      }
+      // Don't show the viewer yet — generate() will scramble the position
 
       rendition.on('rendered', () => {
         if (cancelled || !targetLangRef.current) return;
         translatePage(targetLangRef.current);
       });
 
+      locationsReadyRef.current = false;
       rendition.on('relocated', (loc) => {
-        if (cancelled) return;
+        if (cancelled || !locationsReadyRef.current) return;
         const cfi = loc.start.cfi;
         let pct = 0;
         if (book.locations.length()) {
@@ -258,12 +245,27 @@ export default function Reader() {
         if (e.key === 'ArrowRight') renditionRef.current?.next();
         if (e.key === 'ArrowLeft') renditionRef.current?.prev();
       });
+
+      await book.locations.generate(1600);
+
+      if (!cancelled && renditionRef.current) {
+        await renditionRef.current.display(saved || undefined);
+        const loc = renditionRef.current.currentLocation();
+        if (loc?.start?.cfi && book.locations.length()) {
+          const pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100);
+          setProgress(pct);
+          saveProgress(id, loc.start.cfi, pct);
+        }
+      }
+      locationsReadyRef.current = true;
+      if (!cancelled) setReady(true);
     }
 
     init().catch(() => { if (!cancelled) setNotFound(true); });
 
     return () => {
       cancelled = true;
+      flushProgress();
       renditionRef.current = null;
       if (bookRef.current) {
         bookRef.current.destroy();
