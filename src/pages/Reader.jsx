@@ -272,18 +272,27 @@ export default function Reader() {
     };
   }, [id, applyTheme, translatePage]);
 
+  const supportsFullscreen = typeof document !== 'undefined' &&
+    !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+
   const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
+    const el = document.documentElement;
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!isFs) {
+      (el.requestFullscreen?.() ?? el.webkitRequestFullscreen?.())?.catch?.(() => {});
     } else {
-      document.exitFullscreen();
+      (document.exitFullscreen?.() ?? document.webkitExitFullscreen?.());
     }
   }, []);
 
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    const handler = () => setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
     document.addEventListener('fullscreenchange', handler);
-    return () => document.removeEventListener('fullscreenchange', handler);
+    document.addEventListener('webkitfullscreenchange', handler);
+    return () => {
+      document.removeEventListener('fullscreenchange', handler);
+      document.removeEventListener('webkitfullscreenchange', handler);
+    };
   }, []);
 
   // Flush pending progress save when user hides/closes the tab
@@ -426,7 +435,7 @@ export default function Reader() {
                     stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
             </svg>
           </button>
-          <button
+          {supportsFullscreen && <button
             className={`${styles.iconBtn} ${isFullscreen ? styles.active : ''}`}
             onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
             title={isFullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
@@ -441,7 +450,7 @@ export default function Reader() {
                 <path d="M4 1H1V4M12 1H15V4M4 15H1V12M12 15H15V12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             )}
-          </button>
+          </button>}
           <button
             className={`${styles.iconBtn} ${showSettings ? styles.active : ''}`}
             onClick={(e) => { e.stopPropagation(); setShowSettings(v => !v); setShowToc(false); }}
