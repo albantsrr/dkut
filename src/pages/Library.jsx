@@ -106,16 +106,10 @@ export default function Library() {
   const handleDelete = async (e, id) => {
     e.stopPropagation();
     if (confirmDelete === id) {
-      try {
-        await deleteBook(id);
-        setConfirmDelete(null);
-        const [b, p] = await Promise.all([getAllBooks(), getAllProgress().catch(() => ({}))]);
-        setBooks(b);
-        setProgressMap(p);
-      } catch (err) {
-        alert(`Suppression échouée : ${err.message}`);
-        setConfirmDelete(null);
-      }
+      setBooks(prev => prev.filter(b => b.id !== id));
+      setProgressMap(prev => { const next = { ...prev }; delete next[id]; return next; });
+      setConfirmDelete(null);
+      deleteBook(id).catch(() => {});
     } else {
       setConfirmDelete(id);
       setTimeout(() => setConfirmDelete(null), 3000);
