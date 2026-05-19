@@ -101,6 +101,8 @@ export default function Reader() {
   const [isTranslating, setIsTranslating] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   const [pageChangeSignal, setPageChangeSignal] = useState(0);
   const hideTimer = useRef(null);
   const targetLangRef = useRef('');
@@ -432,22 +434,39 @@ export default function Reader() {
                     stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
             </svg>
           </button>
-          <button
-            className={`${styles.iconBtn} ${isFullscreen ? styles.active : ''}`}
-            onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
-            title={isFullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
-            style={{ color: th.text }}
-          >
-            {isFullscreen ? (
+          {isIOS && !isStandalone ? (
+            <button
+              className={styles.iconBtn}
+              onClick={(e) => {
+                e.stopPropagation();
+                alert('Pour le plein écran, installe l\'app : appuie sur le bouton Partager ↑ puis "Sur l\'écran d\'accueil".');
+              }}
+              title="Installer l'app pour le plein écran"
+              style={{ color: th.text }}
+            >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M1 5H5V1M15 5H11V1M1 11H5V15M15 11H11V15" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M8 1v8M5 4l3-3 3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2 10v4h12v-4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M4 1H1V4M12 1H15V4M4 15H1V12M12 15H15V12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </button>
+            </button>
+          ) : (
+            <button
+              className={`${styles.iconBtn} ${isFullscreen ? styles.active : ''}`}
+              onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
+              title={isFullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
+              style={{ color: th.text }}
+            >
+              {isFullscreen ? (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M1 5H5V1M15 5H11V1M1 11H5V15M15 11H11V15" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 1H1V4M12 1H15V4M4 15H1V12M12 15H15V12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+          )}
           <button
             className={`${styles.iconBtn} ${showSettings ? styles.active : ''}`}
             onClick={(e) => { e.stopPropagation(); setShowSettings(v => !v); setShowToc(false); }}
