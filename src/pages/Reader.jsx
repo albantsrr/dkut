@@ -304,6 +304,11 @@ export default function Reader() {
       // Spinner gone — user sees the book at approximately the right position.
       if (!cancelled) setReady(true);
 
+      // Snapshot the current page CFI before generate() shifts the viewport.
+      // currentLocation() yields a valid, freshly-rendered CFI (from the safeCfi
+      // display above) — safe to use even when the stored CFI is corrupted.
+      const preGenCfi = renditionRef.current?.currentLocation()?.start?.cfi ?? safeCfi;
+
       // generate() can itself throw IndexSizeError on some EPUBs.
       try {
         await book.locations.generate(1600);
@@ -313,13 +318,18 @@ export default function Reader() {
         return;
       }
 
-      // Now we have a valid location index. Derive a fresh, guaranteed-valid CFI
-      // from the saved percentage and jump to the exact position.
-      if (!cancelled && renditionRef.current && savedPct > 0) {
-        try {
-          const targetCfi = book.locations.cfiFromPercentage(savedPct / 100);
-          await renditionRef.current.display(targetCfi);
-        } catch { /* stay at current position */ }
+      // Restore position after generate():
+      // • savedPct > 0  → derive a fresh, precise CFI from the percentage index
+      // • savedPct === 0 (legacy format or book start) → reuse preGenCfi so the
+      //   viewport doesn't drift from wherever generate() left it
+      if (!cancelled && renditionRef.current) {
+        let restoreCfi = preGenCfi;
+        if (savedPct > 0) {
+          try { restoreCfi = book.locations.cfiFromPercentage(savedPct / 100); }
+          catch { /* keep preGenCfi */ }
+        }
+        try { await renditionRef.current.display(restoreCfi ?? undefined); }
+        catch { /* stay where we are */ }
       }
 
       // Write back the freshly-computed CFI/pct, healing any stale entry in Drive.
