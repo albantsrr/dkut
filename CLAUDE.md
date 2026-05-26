@@ -32,12 +32,12 @@ React 18 + Vite 5, epubjs 0.3.93, react-router-dom v6, @google/generative-ai. No
 
 ### Auth & Google Drive layer
 
-Authentication uses Google Identity Services (GSI) implicit-grant flow via `src/lib/googleAuth.js`. The access token is persisted in `localStorage` under `gauth_token` / `gauth_expiry` and considered valid until 60 s before expiry. `requestSignIn()` silently reuses an existing grant or forces the consent screen. **When adding OAuth scopes, bump `SCOPE_VER` in `googleAuth.js`** — this invalidates cached tokens and forces re-consent on next sign-in.
+Authentication uses Google Identity Services (GSI) implicit-grant flow via `src/lib/googleAuth.js`. The access token is persisted in `localStorage` under `gauth_token` / `gauth_expiry` and considered valid until 60 s before expiry. `requestSignIn()` silently reuses an existing grant or forces the consent screen. `invalidateToken()` clears all three localStorage keys without revoking the token (used by the 403 recovery path). **When adding OAuth scopes, bump `SCOPE_VER` in `googleAuth.js`** — this invalidates cached tokens and forces re-consent on next sign-in.
 
 Drive operations are split across three modules:
-- **`src/lib/driveApi.js`** — raw Drive REST v3 wrappers (upload, download, delete, list, search, createFolder). Resumable upload is used for EPUB files.
+- **`src/lib/driveApi.js`** — raw Drive REST v3 wrappers (upload, download, delete, list, search, createFolder). Resumable upload is used for EPUB files. Exports `DriveAuthError` — thrown when a Drive call returns 403 with `ACCESS_TOKEN_SCOPE_INSUFFICIENT`; the handler also calls `invalidateToken()` so the stale token is wiped. Callers (Library.jsx) catch `DriveAuthError` and call `signOut()` to force re-consent.
 - **`src/lib/driveStorage.js`** — session-cached folder/file resolution. Creates a `dkut/` root folder in Drive with two subfolders: `library/` (EPUB files) and `revision-sheet/` (generated markdown notes). Also manages a `bibliotheque-data.json` file at the root. Exposes `loadData()` / `saveData()`, `getLibraryFolderId()`, and `saveNotesheet(title, markdownContent)`. Module-level vars (`_rootId`, `_libraryId`, `_notesheetId`, `_dataFileId`) are all reset on sign-out via `resetDriveStorage()`.
-- **`src/lib/progress.js`** — in-memory mirror of `data.progress`; writes are debounced 1500 ms (`saveProgress` catches errors silently). `flushProgress()` forces an immediate write (called on `visibilitychange`/cleanup). `getAllProgress()` returns all progress entries. Reset on sign-out via `resetProgress()`.
+- **`src/lib/progress.js`** — in-memory mirror of `data.progress`; writes are debounced 1500 ms (`saveProgress` catches errors silently). `flushProgress()` forces an immediate write (called on `visibilitychange`/cleanup). `getAllProgress()` returns all progress entries. `clearProgress(id)` deletes one entry immediately (used when deleting a book). Reset on sign-out via `resetProgress()`.
 
 The Drive data file shape: `{ books: [{ id, title, author, addedAt }], progress: { [driveId]: { cfi, pct } } }`. The `id` field is the Drive file ID of the EPUB. Progress values support a legacy string format (bare CFI) — `getProgress()` normalises both.
 
@@ -75,7 +75,7 @@ Routes:
 - `extractMeta()` in Library and `extractCover()` in storage.js both open a throwaway `Epub` instance, then call `book.destroy()`.
 - Reader renders into `viewerRef` with `flow: 'paginated'` and `spread: 'none'`. The `ArrayBuffer` is always `.slice(0)`-d before passing to epubjs because epubjs consumes (transfers) the buffer.
 - `applyTheme()` always re-registers the theme object before calling `themes.select()`.
-- Location generation (`book.locations.generate(1600)`) happens after initial display; a `locationsReadyRef` flag prevents saving progress until generation is complete, then `rendition.display()` is called a second time to land at the correct position with accurate percentage.
+- Location generation (`book.locations.generate(1600)`) happens after initial display; a `locationsReadyRef` flag prevents saving progress until generation is complete, then `rendition.display()` is called a second time to land at the correct position with accurate percentage. `percentageFromCfi` and `locationFromCfi` calls are wrapped in try/catch because CFI text offsets can be out of bounds after in-place DOM translation.
 - Reader's `useEffect` uses a `cancelled` boolean flag; every `await` must check `if (cancelled) return` before touching state.
 
 ### Library UX details
@@ -92,7 +92,7 @@ Routes:
 - Keyboard: `ArrowLeft`/`ArrowRight` navigate; `Escape` closes panels; `f`/`F` toggles fullscreen. Wired on both `window` and epubjs `rendition`.
 - Mobile tap zones: left/center/right invisible overlay — left/right navigate, center toggles chrome visibility.
 - Translation: `translatePage()` queries text nodes from the EPUB iframe and replaces in-place via Google Translate's unofficial endpoint. Results cached in module-level `_translationCache` Map (key `${lang}\0${text}`). `targetLangRef` mirrors state to avoid stale closure in `rendition.on('relocated')`.
-- Fullscreen: toggled via `document.fullscreenElement`; keyboard shortcut `f/F`.
+- Fullscreen: toggled via `document.fullscreenElement`; keyboard shortcut `f/F`. The current CFI is saved to `preFullscreenCfiRef` before the toggle; on `fullscreenchange`, the rendition is resized with `resize('100%','100%')` and position is restored via `display(cfi)` after a 100 ms settle delay (prevents blank page on viewport resize).
 
 ### Vite / build notes
 

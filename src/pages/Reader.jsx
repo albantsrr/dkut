@@ -99,6 +99,7 @@ export default function Reader() {
   const [showChrome, setShowChrome] = useState(true);
   const [targetLang, setTargetLang] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
+  const [translationProgress, setTranslationProgress] = useState(null); // { done, total } | null
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [pageChangeSignal, setPageChangeSignal] = useState(0);
@@ -165,21 +166,41 @@ export default function Reader() {
     try {
       const els = Array.from(
         doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th')
-      );
+      ).filter(el => el.textContent.trim().length >= 3);
+
+      // Stocker le texte original sur chaque élément (persisté entre les langues)
+      els.forEach(el => {
+        if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
+      });
+
+      let done = 0;
+      setTranslationProgress({ done: 0, total: els.length });
+
       await Promise.all(
         els.map(async (el) => {
-          const text = el.textContent.trim();
-          if (text.length < 3) return;
+          const text = el.dataset.originalText; // toujours depuis l'original
           try {
             el.textContent = await fetchTranslation(text, lang);
           } catch {
             // Keep original text on network/API error
           }
+          done++;
+          setTranslationProgress(prev => prev ? { ...prev, done } : null);
         })
       );
     } finally {
       setIsTranslating(false);
+      setTranslationProgress(null);
     }
+  }, []);
+
+  const restorePage = useCallback(() => {
+    const iframe = viewerRef.current?.querySelector('iframe');
+    const doc = iframe?.contentDocument;
+    if (!doc?.body) return;
+    doc.querySelectorAll('[data-original-text]').forEach(el => {
+      el.textContent = el.dataset.originalText;
+    });
   }, []);
 
   useEffect(() => {
@@ -384,12 +405,12 @@ export default function Reader() {
   const handleLangChange = useCallback((lang) => {
     targetLangRef.current = lang;
     setTargetLang(lang);
-    if (!renditionRef.current) return;
-    // Re-render current page to get original content, then translated via 'rendered' event
-    getProgress(id).then((saved) => {
-      renditionRef.current?.display(saved || undefined);
-    });
-  }, [id]);
+    if (lang === '') {
+      restorePage();
+    } else {
+      translatePage(lang);
+    }
+  }, [translatePage, restorePage]);
 
   if (notFound) {
     return (
@@ -676,6 +697,17 @@ export default function Reader() {
                 <option key={code} value={code}>{label}</option>
               ))}
             </select>
+            {isTranslating && translationProgress && (
+              <div className={styles.translationProgressWrap}>
+                <div
+                  className={styles.translationProgressFill}
+                  style={{ width: `${Math.round((translationProgress.done / translationProgress.total) * 100)}%` }}
+                />
+                <span className={styles.translationProgressCount} style={{ color: th.text }}>
+                  {translationProgress.done} / {translationProgress.total}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Progress */}

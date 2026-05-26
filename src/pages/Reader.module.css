@@ -458,6 +458,31 @@
   100% { background-position: 200% 0; }
 }
 
+/* Translation progress bar */
+.translationProgressWrap {
+  position: relative;
+  margin-top: 0.6rem;
+  height: 3px;
+  background: rgba(200, 169, 110, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.translationProgressFill {
+  height: 100%;
+  background: #c8a96e;
+  border-radius: 2px;
+  transition: width 0.15s ease;
+}
+
+.translationProgressCount {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.65rem;
+  opacity: 0.5;
+  letter-spacing: 0.03em;
+}
+
 /* Progress display */
 .progressBig {
   font-family: var(--font-display);
