@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Epub from 'epubjs';
 import { getBook } from '../utils/storage.js';
-import { getProgress, saveProgress, clearProgress, flushProgress } from '../lib/progress.js';
+import { getProgressFull, saveProgress, clearProgress, flushProgress } from '../lib/progress.js';
 import styles from './Reader.module.css';
 import ChatPanel from '../components/ChatPanel.jsx';
 
@@ -274,47 +274,50 @@ export default function Reader() {
         if (e.key === 'ArrowLeft') renditionRef.current?.prev();
       });
 
-      // Kick off an immediate display(undefined) so epubjs creates its internal View
-      // object right away. Without this there is a window between renderTo() and the
-      // first real display() during which epubjs's ResizeObserver fires and crashes
-      // because the View doesn't exist yet.
-      const baseDisplayP = rendition.display(undefined);
-
       if (cancelled) { book.destroy(); return; }
-      const saved = await getProgress(id);
 
-      // Wait for the base render, then navigate to the saved CFI if we have one.
-      await baseDisplayP.catch(() => {});
-      if (saved && !cancelled && renditionRef.current) {
-        try {
-          // Race against an 8-second timeout: a stale/invalid CFI can cause
-          // epubjs to hang indefinitely (Promise never resolves/rejects).
-          await Promise.race([
-            rendition.display(saved),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('display timeout')), 8000)
-            ),
-          ]);
-        } catch {
-          // Bad CFI or timeout — already at page 1, which is fine.
-        }
-      }
+      // Load saved percentage BEFORE rendering so we have it ready after generate().
+      // We intentionally do NOT pass the raw stored CFI to rendition.display():
+      // a stale CFI (e.g. "offset 85 doesn't exist") crashes epubjs's internal render
+      // queue synchronously — the queue processor dies, every subsequent display() call
+      // hangs forever, and the screen stays black. Using the percentage instead means
+      // we always ask epubjs for a freshly generated, guaranteed-valid CFI.
+      const savedEntry = await getProgressFull(id); // { cfi, pct } | null
+      const savedPct   = savedEntry?.pct ?? 0;
 
-      // Show the book immediately — don't wait for locations generation which can
-      // take 10-30 s on large EPUBs. Progress % will appear once generation completes.
+      // Render page 1 immediately — creates epubjs's internal View object, which also
+      // prevents the ResizeObserver crash that fires between renderTo() and display().
+      try { await rendition.display(undefined); } catch { /* ignore */ }
+
+      // Show the book — spinner gone, page 1 is visible.
+      // Progress % will appear once generate() completes below.
       if (!cancelled) setReady(true);
 
-      await book.locations.generate(1600);
+      // generate() itself can throw IndexSizeError on some EPUBs; catch it so the
+      // reader stays functional at page 1 rather than crashing.
+      try {
+        await book.locations.generate(1600);
+      } catch {
+        // Cannot build location index for this EPUB — navigation and % will be absent,
+        // but the book is still readable. Unlock normal page-turn progress saving.
+        locationsReadyRef.current = true;
+        return;
+      }
 
-      // Re-display at the saved position: generate() can shift the viewport,
-      // and now the location index lets us land on the exact character offset.
-      if (!cancelled && renditionRef.current) {
+      // After generate() we have a valid location index. Use the saved percentage to
+      // derive a fresh, valid CFI and navigate there — no raw stored CFI ever touches
+      // the render queue.
+      if (!cancelled && renditionRef.current && savedPct > 0) {
         try {
-          await renditionRef.current.display(saved || undefined);
-        } catch {
-          // CFI may be out of bounds after location generation — stay where we are.
-        }
-        const loc = renditionRef.current?.currentLocation();
+          const targetCfi = book.locations.cfiFromPercentage(savedPct / 100);
+          await renditionRef.current.display(targetCfi);
+        } catch { /* bad percentage edge-case — stay at page 1 */ }
+      }
+
+      // Record the exact landing position with a freshly computed CFI/pct so stale
+      // CFIs in Drive are overwritten on the next save.
+      if (!cancelled && renditionRef.current) {
+        const loc = renditionRef.current.currentLocation();
         if (loc?.start?.cfi && book.locations.length()) {
           let pct = 0;
           try {

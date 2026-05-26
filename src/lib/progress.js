@@ -27,6 +27,16 @@ export async function getProgress(id) {
   return typeof val === 'string' ? val : val.cfi;
 }
 
+// Returns the full { cfi, pct } entry or null.
+// Used by Reader to restore position via percentage rather than raw CFI,
+// so a stale CFI can never kill epubjs's render queue.
+export async function getProgressFull(id) {
+  await ensureProgress();
+  const val = _progress[id] ?? null;
+  if (!val) return null;
+  return typeof val === 'string' ? { cfi: val, pct: 0 } : val;
+}
+
 // Returns progress data for all books as { [id]: { cfi, pct } }.
 export async function getAllProgress() {
   await ensureProgress();
