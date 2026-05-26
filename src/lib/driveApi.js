@@ -1,4 +1,4 @@
-import { getAccessToken, invalidateToken } from './googleAuth.js';
+import { getAccessToken } from './googleAuth.js';
 
 const DRIVE_API  = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
@@ -27,9 +27,8 @@ async function driveRequest(path, options = {}) {
       try {
         const data = JSON.parse(text);
         if (data?.error?.details?.some(d => d.reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT')) {
-          // Token lacks Drive scope — clear it so next isSignedIn() check fails
-          // and requestSignIn() will force re-consent.
-          invalidateToken();
+          // Token lacks Drive scope. Do NOT clear localStorage here — signOut() in
+          // the caller needs the token to revoke it server-side before clearing.
           throw new DriveAuthError(`Drive API 403: ${text}`);
         }
       } catch (e) {
