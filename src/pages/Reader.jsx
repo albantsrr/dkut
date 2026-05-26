@@ -237,7 +237,6 @@ export default function Reader() {
       if (cancelled) { book.destroy(); return; }
       const saved = await getProgress(id);
       await rendition.display(saved || undefined);
-      // Don't show the viewer yet — generate() will scramble the position
 
       rendition.on('rendered', () => {
         if (cancelled || !targetLangRef.current) return;
@@ -278,8 +277,14 @@ export default function Reader() {
         if (e.key === 'ArrowLeft') renditionRef.current?.prev();
       });
 
+      // Show the book immediately — don't wait for locations generation which can
+      // take 10-30 s on large EPUBs. Progress % will appear once generation completes.
+      if (!cancelled) setReady(true);
+
       await book.locations.generate(1600);
 
+      // Re-display at the saved position: generate() can shift the viewport,
+      // and now the location index lets us land on the exact character offset.
       if (!cancelled && renditionRef.current) {
         await renditionRef.current.display(saved || undefined);
         const loc = renditionRef.current.currentLocation();
@@ -293,7 +298,6 @@ export default function Reader() {
         }
       }
       locationsReadyRef.current = true;
-      if (!cancelled) setReady(true);
     }
 
     init().catch(() => { if (!cancelled) setNotFound(true); });

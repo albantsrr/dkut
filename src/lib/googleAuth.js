@@ -56,8 +56,10 @@ export function requestSignIn() {
       localStorage.setItem(SCOPE_KEY, SCOPE_VER);
       resolve();
     };
-    // prompt: '' reuses existing consent silently; 'consent' forces the picker
-    _tokenClient.requestAccessToken({ prompt: isSignedIn() ? '' : 'consent' });
+    // prompt: '' reuses existing consent silently (used for proactive token refresh).
+    // 'select_account consent' forces the account picker + full consent screen so
+    // Google cannot silently auto-grant a token that lacks the Drive scope.
+    _tokenClient.requestAccessToken({ prompt: isSignedIn() ? '' : 'select_account consent' });
   });
 }
 
@@ -67,6 +69,10 @@ export function signOut() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(EXPIRY_KEY);
   localStorage.removeItem(SCOPE_KEY);
+  // Re-create the token client so GIS internal state is fresh for the next sign-in.
+  // Without this, the cached grant state can cause Google to silently auto-grant
+  // a new token that lacks the Drive scope, leading to an infinite redirect loop.
+  _createTokenClient();
 }
 
 // Clears the locally cached token without revoking it server-side.
