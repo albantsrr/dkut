@@ -1,7 +1,15 @@
-import { getAccessToken } from './googleAuth.js';
+import { getAccessToken, invalidateToken } from './googleAuth.js';
 
 const DRIVE_API  = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
+
+// Typed error so callers can distinguish auth failures from generic Drive errors.
+export class DriveAuthError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'DriveAuthError';
+  }
+}
 
 async function driveRequest(path, options = {}) {
   const token = getAccessToken();
@@ -15,6 +23,20 @@ async function driveRequest(path, options = {}) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    if (res.status === 403) {
+      try {
+        const data = JSON.parse(text);
+        if (data?.error?.details?.some(d => d.reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT')) {
+          // Token lacks Drive scope — clear it so next isSignedIn() check fails
+          // and requestSignIn() will force re-consent.
+          invalidateToken();
+          throw new DriveAuthError(`Drive API 403: ${text}`);
+        }
+      } catch (e) {
+        if (e instanceof DriveAuthError) throw e;
+        // JSON parse failed — fall through to generic error
+      }
+    }
     throw new Error(`Drive API ${res.status}: ${text}`);
   }
   return res;

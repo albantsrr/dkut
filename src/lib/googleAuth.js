@@ -68,3 +68,11 @@ export function signOut() {
   localStorage.removeItem(EXPIRY_KEY);
   localStorage.removeItem(SCOPE_KEY);
 }
+
+// Clears the locally cached token without revoking it server-side.
+// Use when the token is already invalid (e.g. Drive 403 scope error).
+export function invalidateToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(EXPIRY_KEY);
+  localStorage.removeItem(SCOPE_KEY);
+}

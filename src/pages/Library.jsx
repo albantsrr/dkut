@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Epub from 'epubjs';
 import { getAllBooks, saveBook, deleteBook, syncLibrary } from '../utils/storage.js';
 import { getAllProgress, clearProgress } from '../lib/progress.js';
+import { DriveAuthError } from '../lib/driveApi.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import styles from './Library.module.css';
 
@@ -72,9 +73,16 @@ export default function Library() {
     setInitialLoading(true);
     Promise.all([getAllBooks(), getAllProgress().catch(() => ({}))])
       .then(([b, p]) => { setBooks(b); setProgressMap(p); })
-      .catch((err) => setFetchError(err.message ?? 'Failed to load books from Drive.'))
+      .catch((err) => {
+        if (err instanceof DriveAuthError) {
+          // Token lacks Drive scope — sign out silently; ProtectedRoute redirects to /auth
+          signOut();
+          return;
+        }
+        setFetchError(err.message ?? 'Failed to load books from Drive.');
+      })
       .finally(() => setInitialLoading(false));
-  }, []);
+  }, [signOut]);
 
   const processFiles = useCallback(async (files) => {
     const epubs = Array.from(files).filter(f => f.name.endsWith('.epub'));
