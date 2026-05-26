@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Epub from 'epubjs';
 import { getBook } from '../utils/storage.js';
-import { getProgressFull, saveProgress, clearProgress, flushProgress } from '../lib/progress.js';
+import { getProgress, saveProgress, clearProgress, flushProgress } from '../lib/progress.js';
 import styles from './Reader.module.css';
 import ChatPanel from '../components/ChatPanel.jsx';
 
@@ -275,65 +275,100 @@ export default function Reader() {
       });
 
       if (cancelled) { book.destroy(); return; }
+      const saved = await getProgress(id);
 
-      // Load the full saved entry { cfi, pct }.
-      const savedEntry = await getProgressFull(id);
-      const savedPct   = savedEntry?.pct ?? 0;
+      // Helper: re-attach all event handlers to a rendition instance.
+      // Called once on the initial rendition, and again if we have to rebuild it
+      // after a queue crash.
+      const attachHandlers = (r) => {
+        r.on('rendered', () => {
+          if (cancelled || !targetLangRef.current) return;
+          translatePage(targetLangRef.current);
+        });
+        locationsReadyRef.current = false;
+        r.on('relocated', (loc) => {
+          if (cancelled || !locationsReadyRef.current) return;
+          const cfi = loc.start.cfi;
+          let pct = 0;
+          if (book.locations.length()) {
+            try { pct = Math.round(book.locations.percentageFromCfi(cfi) * 100); }
+            catch { /* CFI out of bounds after DOM translation */ }
+            if (book.locations.total) {
+              try {
+                const locNum = book.locations.locationFromCfi(cfi);
+                setLocDebug(`${locNum ?? '?'} / ${book.locations.total}`);
+              } catch { /* ignore */ }
+            }
+          }
+          setProgress(pct);
+          saveProgress(id, cfi, pct);
+          const match = flattenToc(nav.toc).find(
+            (item) => item.href && cfi.includes(item.href.split('#')[0])
+          );
+          setCurrentChapter(match?.label?.trim() || '');
+          requestAnimationFrame(() => { if (!cancelled) pageTextRef.current = capturePageText(); });
+          setPageChangeSignal(n => n + 1);
+        });
+        r.on('keyup', (e) => {
+          if (e.key === 'ArrowRight') renditionRef.current?.next();
+          if (e.key === 'ArrowLeft') renditionRef.current?.prev();
+        });
+      };
 
-      // The full CFI (e.g. "epubcfi(/6/4[c01]!/4/2/3:85)") can crash epubjs's render
-      // queue: the ":85" text-offset causes Range.setStart() to throw IndexSizeError
-      // SYNCHRONOUSLY inside the queue processor — epubjs doesn't catch it, the
-      // processor dies, every subsequent display() hangs → black screen.
+      // The initial rendition already has its handlers wired above; move them
+      // into attachHandlers so we can re-use on a rebuilt rendition if needed.
+      // (The three .on() calls earlier in the function are now handled here.)
+
+      // A corrupted CFI (e.g. "offset 85 doesn't exist") causes epubjs to throw
+      // IndexSizeError SYNCHRONOUSLY inside its render-queue processor. epubjs
+      // doesn't wrap the call in try/catch, so the queue dies and every subsequent
+      // display() hangs → black screen.
       //
-      // Fix: strip only the trailing text offset before the first display.
-      //   "epubcfi(/6/4[c01]!/4/2/3:85)"  →  "epubcfi(/6/4[c01]!/4/2/3)"
-      // An element-level CFI (no character offset) never crashes. The user lands on
-      // approximately the right position (same paragraph / same page in most cases).
-      // After generate() we restore the exact position via cfiFromPercentage.
-      const safeCfi = savedEntry?.cfi
-        ? savedEntry.cfi.replace(/:\d+\)$/, ')')
-        : undefined;
-
+      // Strategy: listen for that synchronous error via window.onerror. If it fires
+      // (or the Promise times out), rebuild the rendition with a fresh queue and
+      // start from page 1. For the common case of a valid CFI, nothing changes.
+      let cfiCrashed = false;
+      const onQueueError = (evt) => {
+        if (evt.error?.name === 'IndexSizeError' || evt.message?.includes('IndexSizeError')) {
+          cfiCrashed = true;
+          evt.preventDefault(); // suppress "Uncaught" in console
+        }
+      };
+      window.addEventListener('error', onQueueError);
       try {
-        await rendition.display(safeCfi ?? undefined);
-      } catch {
-        // Even the element-level CFI failed — fall back to page 1.
-        try { await rendition.display(undefined); } catch { /* ignore */ }
+        await Promise.race([
+          rendition.display(saved || undefined),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('cfi-timeout')), 5000)),
+        ]);
+      } catch { cfiCrashed = true; }
+      window.removeEventListener('error', onQueueError);
+
+      if (cfiCrashed && !cancelled) {
+        // The queue is dead. Wipe the corrupt progress, clear the DOM, rebuild.
+        clearProgress(id).catch(() => {});
+        viewerRef.current.innerHTML = '';
+        const r2 = book.renderTo(viewerRef.current, {
+          width: '100%', height: '100%',
+          spread: 'none', flow: 'paginated',
+          allowScriptedContent: false,
+        });
+        renditionRef.current = r2;
+        applyTheme(r2, 'night', 18);
+        attachHandlers(r2);
+        await r2.display(undefined);
       }
 
-      // Spinner gone — user sees the book at approximately the right position.
       if (!cancelled) setReady(true);
 
-      // Snapshot the current page CFI before generate() shifts the viewport.
-      // currentLocation() yields a valid, freshly-rendered CFI (from the safeCfi
-      // display above) — safe to use even when the stored CFI is corrupted.
-      const preGenCfi = renditionRef.current?.currentLocation()?.start?.cfi ?? safeCfi;
+      await book.locations.generate(1600);
 
-      // generate() can itself throw IndexSizeError on some EPUBs.
-      try {
-        await book.locations.generate(1600);
-      } catch {
-        // Location index unavailable — book still readable, progress % won't show.
-        locationsReadyRef.current = true;
-        return;
-      }
-
-      // Restore position after generate():
-      // • savedPct > 0  → derive a fresh, precise CFI from the percentage index
-      // • savedPct === 0 (legacy format or book start) → reuse preGenCfi so the
-      //   viewport doesn't drift from wherever generate() left it
+      // Re-display at the saved position after generate() — same logic as before:
+      // the location index now lets epubjs land on the exact character offset.
+      // Skip if the CFI was bad (we cleared it above).
       if (!cancelled && renditionRef.current) {
-        let restoreCfi = preGenCfi;
-        if (savedPct > 0) {
-          try { restoreCfi = book.locations.cfiFromPercentage(savedPct / 100); }
-          catch { /* keep preGenCfi */ }
+        if (!cfiCrashed && saved) {
+          try { await renditionRef.current.display(saved); } catch { /* ignore */ }
         }
-        try { await renditionRef.current.display(restoreCfi ?? undefined); }
-        catch { /* stay where we are */ }
-      }
-
-      // Write back the freshly-computed CFI/pct, healing any stale entry in Drive.
-      if (!cancelled && renditionRef.current) {
         const loc = renditionRef.current.currentLocation();
         if (loc?.start?.cfi && book.locations.length()) {
           let pct = 0;
