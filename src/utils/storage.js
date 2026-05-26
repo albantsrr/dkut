@@ -9,26 +9,37 @@ import {
 
 // Extracts the cover image from an EPUB ArrayBuffer.
 // Returns a base64 data URL or null. Always destroys the throwaway Epub instance.
+// Hard-capped at 7 s: book.coverUrl() or fetch(coverUrl) can hang indefinitely on
+// some EPUBs (blob URL race / missing resource), which would freeze getBook() and
+// leave the Reader spinner on-screen forever.
 async function extractCover(arrayBuffer) {
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (val) => { if (!settled) { settled = true; resolve(val); } };
+    // Safety net: if nothing resolves within 7 s, give up and return null.
+    const timer = setTimeout(() => settle(null), 7000);
+
     const book = Epub(arrayBuffer.slice(0));
     book.ready.then(async () => {
       let cover = null;
       try {
         const coverUrl = await book.coverUrl();
-        if (coverUrl) {
+        if (coverUrl && !settled) {
           const resp = await fetch(coverUrl);
           const blob = await resp.blob();
-          cover = await new Promise((res) => {
-            const fr = new FileReader();
-            fr.onloadend = () => res(fr.result);
-            fr.readAsDataURL(blob);
-          });
+          if (!settled) {
+            cover = await new Promise((res) => {
+              const fr = new FileReader();
+              fr.onloadend = () => res(fr.result);
+              fr.readAsDataURL(blob);
+            });
+          }
         }
       } catch { /* no cover — leave null */ }
+      clearTimeout(timer);
       book.destroy();
-      resolve(cover);
-    }).catch(() => { book.destroy(); resolve(null); });
+      settle(cover);
+    }).catch(() => { clearTimeout(timer); book.destroy(); settle(null); });
   });
 }
 

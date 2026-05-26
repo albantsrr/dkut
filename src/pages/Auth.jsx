@@ -31,8 +31,12 @@ export default function Auth() {
     try {
       await signIn();
       navigate('/', { replace: true });
-    } catch {
-      setError('Sign in cancelled or failed. Please try again.');
+    } catch (err) {
+      if (err?.message === 'drive_scope_missing') {
+        setError('Google Drive access is required. Please click "Sign in" again and approve all permissions.');
+      } else {
+        setError('Sign in cancelled or failed. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }

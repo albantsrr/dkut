@@ -11,7 +11,7 @@ export class DriveAuthError extends Error {
   }
 }
 
-async function driveRequest(path, options = {}) {
+async function driveRequest(path, options = {}, _attempt = 0) {
   const token = getAccessToken();
   if (!token) throw new Error('Not authenticated');
   const res = await fetch(`${DRIVE_API}${path}`, {
@@ -33,8 +33,14 @@ async function driveRequest(path, options = {}) {
         }
       } catch (e) {
         if (e instanceof DriveAuthError) throw e;
-        // JSON parse failed — fall through to generic error
+        // JSON parse failed — fall through to retry / generic error
       }
+    }
+    // Retry once on 401 / non-scope 403: Google's distributed infrastructure can
+    // return these transiently right after a fresh token is issued (propagation lag).
+    if (_attempt === 0 && (res.status === 401 || res.status === 403)) {
+      await new Promise(r => setTimeout(r, 1200));
+      return driveRequest(path, options, 1);
     }
     throw new Error(`Drive API ${res.status}: ${text}`);
   }

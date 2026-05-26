@@ -234,10 +234,7 @@ export default function Reader() {
 
       applyTheme(rendition, 'night', 18);
 
-      if (cancelled) { book.destroy(); return; }
-      const saved = await getProgress(id);
-      await rendition.display(saved || undefined);
-
+      // Wire up event handlers BEFORE any display() call so no events are missed.
       rendition.on('rendered', () => {
         if (cancelled || !targetLangRef.current) return;
         translatePage(targetLangRef.current);
@@ -277,6 +274,32 @@ export default function Reader() {
         if (e.key === 'ArrowLeft') renditionRef.current?.prev();
       });
 
+      // Kick off an immediate display(undefined) so epubjs creates its internal View
+      // object right away. Without this there is a window between renderTo() and the
+      // first real display() during which epubjs's ResizeObserver fires and crashes
+      // because the View doesn't exist yet.
+      const baseDisplayP = rendition.display(undefined);
+
+      if (cancelled) { book.destroy(); return; }
+      const saved = await getProgress(id);
+
+      // Wait for the base render, then navigate to the saved CFI if we have one.
+      await baseDisplayP.catch(() => {});
+      if (saved && !cancelled && renditionRef.current) {
+        try {
+          // Race against an 8-second timeout: a stale/invalid CFI can cause
+          // epubjs to hang indefinitely (Promise never resolves/rejects).
+          await Promise.race([
+            rendition.display(saved),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('display timeout')), 8000)
+            ),
+          ]);
+        } catch {
+          // Bad CFI or timeout — already at page 1, which is fine.
+        }
+      }
+
       // Show the book immediately — don't wait for locations generation which can
       // take 10-30 s on large EPUBs. Progress % will appear once generation completes.
       if (!cancelled) setReady(true);
@@ -286,8 +309,12 @@ export default function Reader() {
       // Re-display at the saved position: generate() can shift the viewport,
       // and now the location index lets us land on the exact character offset.
       if (!cancelled && renditionRef.current) {
-        await renditionRef.current.display(saved || undefined);
-        const loc = renditionRef.current.currentLocation();
+        try {
+          await renditionRef.current.display(saved || undefined);
+        } catch {
+          // CFI may be out of bounds after location generation — stay where we are.
+        }
+        const loc = renditionRef.current?.currentLocation();
         if (loc?.start?.cfi && book.locations.length()) {
           let pct = 0;
           try {
