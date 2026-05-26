@@ -36,10 +36,10 @@ Authentication uses Google Identity Services (GSI) implicit-grant flow via `src/
 
 Drive operations are split across three modules:
 - **`src/lib/driveApi.js`** — raw Drive REST v3 wrappers (upload, download, delete, list, search, createFolder). Resumable upload is used for EPUB files.
-- **`src/lib/driveStorage.js`** — session-cached folder/file resolution. Ensures a `Bibliothèque/` Drive folder and a `bibliotheque-data.json` file exist; exposes `loadData()` / `saveData()`. Both `_folderId` and `_dataFileId` are module-level vars reset on sign-out via `resetDriveStorage()`.
-- **`src/lib/progress.js`** — in-memory mirror of `data.progress`; writes are fire-and-forget (`saveData` catches errors silently) except `clearProgress` which awaits. Reset on sign-out via `resetProgress()`.
+- **`src/lib/driveStorage.js`** — session-cached folder/file resolution. Creates a `dkut/` root folder in Drive with two subfolders: `library/` (EPUB files) and `revision-sheet/` (generated markdown notes). Also manages a `bibliotheque-data.json` file at the root. Exposes `loadData()` / `saveData()`, `getLibraryFolderId()`, and `saveNotesheet(title, markdownContent)`. Module-level vars (`_rootId`, `_libraryId`, `_notesheetId`, `_dataFileId`) are all reset on sign-out via `resetDriveStorage()`.
+- **`src/lib/progress.js`** — in-memory mirror of `data.progress`; writes are debounced 1500 ms (`saveProgress` catches errors silently). `flushProgress()` forces an immediate write (called on `visibilitychange`/cleanup). `getAllProgress()` returns all progress entries. Reset on sign-out via `resetProgress()`.
 
-The Drive data file shape: `{ books: [{ id, title, author, addedAt }], progress: { [driveId]: cfi } }`. The `id` field is the Drive file ID of the EPUB.
+The Drive data file shape: `{ books: [{ id, title, author, addedAt }], progress: { [driveId]: { cfi, pct } } }`. The `id` field is the Drive file ID of the EPUB. Progress values support a legacy string format (bare CFI) — `getProgress()` normalises both.
 
 ### Local cache
 
@@ -48,10 +48,11 @@ The Drive data file shape: `{ books: [{ id, title, author, addedAt }], progress:
 ### Book storage facade
 
 `src/utils/storage.js` is the public API used by Library and Reader. It orchestrates Drive + cache:
-- `saveBook()` uploads to Drive, caches locally, appends to `bibliotheque-data.json`.
+- `saveBook()` uploads to Drive under `dkut/library/`, caches locally, appends to `bibliotheque-data.json`. Skips upload if title+author already exists.
 - `getBook(id)` checks IDB cache first, falls back to `downloadFile`, then re-caches.
-- `getAllBooks()` returns metadata + cached covers without downloading EPUB data.
+- `getAllBooks()` returns metadata + cached covers without downloading EPUB data. Silently deduplicates by title+author (keeps most recent `addedAt`).
 - `deleteBook(id)` deletes from Drive, evicts IDB cache, removes from `bibliotheque-data.json`.
+- `syncLibrary()` scans `dkut/library/` on Drive and registers any EPUB not already in `bibliotheque-data.json`; returns the count of newly added books.
 
 Book IDs are Drive file IDs.
 
@@ -74,7 +75,7 @@ Routes:
 - `extractMeta()` in Library and `extractCover()` in storage.js both open a throwaway `Epub` instance, then call `book.destroy()`.
 - Reader renders into `viewerRef` with `flow: 'paginated'` and `spread: 'none'`. The `ArrayBuffer` is always `.slice(0)`-d before passing to epubjs because epubjs consumes (transfers) the buffer.
 - `applyTheme()` always re-registers the theme object before calling `themes.select()`.
-- Location generation (`book.locations.generate(1600)`) happens after initial display so progress percentage is asynchronous.
+- Location generation (`book.locations.generate(1600)`) happens after initial display; a `locationsReadyRef` flag prevents saving progress until generation is complete, then `rendition.display()` is called a second time to land at the correct position with accurate percentage.
 - Reader's `useEffect` uses a `cancelled` boolean flag; every `await` must check `if (cancelled) return` before touching state.
 
 ### Library UX details
@@ -82,13 +83,16 @@ Routes:
 - Upload: drag-and-drop or file picker; both call `processFiles()`, which filters `.epub` only, extracts metadata per file, then calls `saveBook()`.
 - Books with no cover get a deterministic color from `spineColor()`, which hashes the title into one of 8 dark palettes.
 - Delete requires two clicks: first click arms `confirmDelete` state for 3 s.
+- **Sync Drive** button calls `syncLibrary()` to discover EPUBs already in Drive that aren't yet registered in the data file.
 
 ### Reader UX details
 
 - Themes: `night` (dark brown), `sepia` (warm cream), `day` (off-white). Font size 13–26 px, 1 px steps.
-- Reading position (CFI) is loaded via `getProgress(id)` and saved via `saveProgress(id, cfi)` from `src/lib/progress.js` (Drive-backed, fire-and-forget).
-- Keyboard: `ArrowLeft`/`ArrowRight` navigate; `Escape` closes panels. Wired on both `window` and epubjs `rendition`.
+- Reading position (CFI + percentage) is loaded via `getProgress(id)` and saved via `saveProgress(id, cfi, pct)` from `src/lib/progress.js` (Drive-backed, debounced, flushed on tab hide/unmount).
+- Keyboard: `ArrowLeft`/`ArrowRight` navigate; `Escape` closes panels; `f`/`F` toggles fullscreen. Wired on both `window` and epubjs `rendition`.
+- Mobile tap zones: left/center/right invisible overlay — left/right navigate, center toggles chrome visibility.
 - Translation: `translatePage()` queries text nodes from the EPUB iframe and replaces in-place via Google Translate's unofficial endpoint. Results cached in module-level `_translationCache` Map (key `${lang}\0${text}`). `targetLangRef` mirrors state to avoid stale closure in `rendition.on('relocated')`.
+- Fullscreen: toggled via `document.fullscreenElement`; keyboard shortcut `f/F`.
 
 ### Vite / build notes
 
@@ -104,6 +108,8 @@ Top bar, nav arrows, and bottom bar auto-hide after 3.5 s of inactivity. Any `mo
 
 ### AI reading assistant
 
-`src/lib/geminiApi.js` — stateless async-generator wrapper around `@google/generative-ai`. Exports `streamChatMessage()` which yields text chunks from Gemini 2.5 Flash. Full page text is injected as context in each user message via `buildUserMessage()`. History is capped at the last 20 messages (non-separator, non-streaming) via `buildHistory()` in ChatPanel. The system instruction is dynamically built by `buildSystemInstruction()` with book title, author, and chapter; instructs Gemini to always respond in French, concisely (3–5 sentences).
+`src/lib/geminiApi.js` — wrapper around `@google/generative-ai` using `gemini-2.5-flash`. Exports:
+- `streamChatMessage()` — async generator yielding text chunks; injects full page text as context. System instruction always responds in French, concisely (3–5 sentences).
+- `generateRevisionSheet()` — non-streaming; produces a structured markdown revision sheet (résumé, concepts clés, termes importants, questions de révision) from the current chapter text.
 
-`src/components/ChatPanel.jsx` — bottom drawer (50vh, slides up). Props: `isOpen`, `onClose`, `themeColors`, `bookTitle`, `bookAuthor`, `chapterName`, `getPageText` (lazy callback), `pageChangeSignal` (incremented on each `relocated` event to insert page-change separators). Streams responses chunk by chunk; aborts on unmount. Four hardcoded `SUGGESTED_PROMPTS` appear as quick-start chips (résumé, termes difficiles, questions, simplification).
+`src/components/ChatPanel.jsx` — bottom drawer (50vh, slides up). The "Create a revision sheet" suggested prompt calls `generateRevisionSheet()` and renders the result as a `revision-sheet` message type (not part of chat history) with a **Save to Drive** button that calls `saveNotesheet()`, saving the markdown to `dkut/revision-sheet/<title>.md` in Drive. Other three suggested prompts send normal chat messages. History is capped at the last 20 non-separator/non-revision-sheet messages via `buildHistory()`. Streams responses chunk by chunk; aborts on unmount.

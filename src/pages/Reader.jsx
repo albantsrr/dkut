@@ -102,16 +102,19 @@ export default function Reader() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [pageChangeSignal, setPageChangeSignal] = useState(0);
+  const [locDebug, setLocDebug] = useState('');
   const hideTimer = useRef(null);
   const targetLangRef = useRef('');
   const pageTextRef = useRef('');
   const locationsReadyRef = useRef(false);
+  const preFullscreenCfiRef = useRef(null);
 
   const applyTheme = useCallback((rendition, t, size) => {
     const th = THEMES[t];
     rendition.themes.register('current', {
       'html': {
         'background-color': `${th.bodyBg} !important`,
+        'translate': 'no',
       },
       'body': {
         'background-color': `${th.bodyBg} !important`,
@@ -226,9 +229,17 @@ export default function Reader() {
         const cfi = loc.start.cfi;
         let pct = 0;
         if (book.locations.length()) {
-          pct = Math.round(book.locations.percentageFromCfi(cfi) * 100);
-          setProgress(pct);
+          try {
+            pct = Math.round(book.locations.percentageFromCfi(cfi) * 100);
+          } catch { /* CFI text-offset out of bounds (e.g. after DOM translation) */ }
+          if (book.locations.total) {
+            try {
+              const locNum = book.locations.locationFromCfi(cfi);
+              setLocDebug(`${locNum ?? '?'} / ${book.locations.total}`);
+            } catch { /* ignore */ }
+          }
         }
+        setProgress(pct);
         saveProgress(id, cfi, pct);
 
         const match = flattenToc(nav.toc).find(
@@ -252,7 +263,10 @@ export default function Reader() {
         await renditionRef.current.display(saved || undefined);
         const loc = renditionRef.current.currentLocation();
         if (loc?.start?.cfi && book.locations.length()) {
-          const pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100);
+          let pct = 0;
+          try {
+            pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100);
+          } catch { /* ignore */ }
           setProgress(pct);
           saveProgress(id, loc.start.cfi, pct);
         }
@@ -275,6 +289,8 @@ export default function Reader() {
   }, [id, applyTheme, translatePage]);
 
   const toggleFullscreen = useCallback(() => {
+    // Save position before the viewport changes so we can restore it after
+    preFullscreenCfiRef.current = renditionRef.current?.currentLocation()?.start?.cfi ?? null;
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
     } else {
@@ -283,7 +299,17 @@ export default function Reader() {
   }, []);
 
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    const handler = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+      // Wait for the browser to settle its new layout, then resize + restore position
+      setTimeout(() => {
+        if (!renditionRef.current) return;
+        renditionRef.current.resize('100%', '100%');
+        if (preFullscreenCfiRef.current) {
+          renditionRef.current.display(preFullscreenCfiRef.current);
+        }
+      }, 100);
+    };
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
@@ -481,7 +507,7 @@ export default function Reader() {
           ‹
         </button>
 
-        <div ref={viewerRef} className={styles.viewer} style={{ pointerEvents: showChat ? 'none' : 'auto' }} />
+        <div ref={viewerRef} className={styles.viewer} translate="no" style={{ pointerEvents: showChat ? 'none' : 'auto' }} />
 
         <button
           className={`${styles.navArrow} ${styles.navNext} ${showChrome ? styles.visible : ''}`}
@@ -528,6 +554,11 @@ export default function Reader() {
         <span className={styles.chapterLabel} style={{ color: th.text + '80' }}>
           {currentChapter}
         </span>
+        {locDebug && (
+          <span className={styles.locDebug} style={{ color: th.text + '40' }}>
+            loc {locDebug}
+          </span>
+        )}
         <span className={styles.progressLabel} style={{ color: th.text + '60' }}>
           {progress}%
         </span>

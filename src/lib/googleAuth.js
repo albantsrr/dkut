@@ -3,7 +3,7 @@ const SCOPE       = 'https://www.googleapis.com/auth/drive email profile openid'
 const TOKEN_KEY   = 'gauth_token';
 const EXPIRY_KEY  = 'gauth_expiry';
 const SCOPE_KEY   = 'gauth_scope';
-const SCOPE_VER   = 'v3'; // bump when scope changes to force re-consent
+const SCOPE_VER   = 'v4'; // bumped: forces re-consent to ensure drive scope is granted
 
 let _tokenClient = null;
 

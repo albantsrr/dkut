@@ -232,6 +232,13 @@
   letter-spacing: 0.15em;
 }
 
+.locDebug {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+
 /* ── TOC Sidebar ── */
 .sidebar {
   position: absolute;
