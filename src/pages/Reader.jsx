@@ -276,53 +276,59 @@ export default function Reader() {
 
       if (cancelled) { book.destroy(); return; }
 
-      // Load saved percentage BEFORE rendering so we have it ready after generate().
-      // We intentionally do NOT pass the raw stored CFI to rendition.display():
-      // a stale CFI (e.g. "offset 85 doesn't exist") crashes epubjs's internal render
-      // queue synchronously — the queue processor dies, every subsequent display() call
-      // hangs forever, and the screen stays black. Using the percentage instead means
-      // we always ask epubjs for a freshly generated, guaranteed-valid CFI.
-      const savedEntry = await getProgressFull(id); // { cfi, pct } | null
+      // Load the full saved entry { cfi, pct }.
+      const savedEntry = await getProgressFull(id);
       const savedPct   = savedEntry?.pct ?? 0;
 
-      // Render page 1 immediately — creates epubjs's internal View object, which also
-      // prevents the ResizeObserver crash that fires between renderTo() and display().
-      try { await rendition.display(undefined); } catch { /* ignore */ }
+      // The full CFI (e.g. "epubcfi(/6/4[c01]!/4/2/3:85)") can crash epubjs's render
+      // queue: the ":85" text-offset causes Range.setStart() to throw IndexSizeError
+      // SYNCHRONOUSLY inside the queue processor — epubjs doesn't catch it, the
+      // processor dies, every subsequent display() hangs → black screen.
+      //
+      // Fix: strip only the trailing text offset before the first display.
+      //   "epubcfi(/6/4[c01]!/4/2/3:85)"  →  "epubcfi(/6/4[c01]!/4/2/3)"
+      // An element-level CFI (no character offset) never crashes. The user lands on
+      // approximately the right position (same paragraph / same page in most cases).
+      // After generate() we restore the exact position via cfiFromPercentage.
+      const safeCfi = savedEntry?.cfi
+        ? savedEntry.cfi.replace(/:\d+\)$/, ')')
+        : undefined;
 
-      // Show the book — spinner gone, page 1 is visible.
-      // Progress % will appear once generate() completes below.
+      try {
+        await rendition.display(safeCfi ?? undefined);
+      } catch {
+        // Even the element-level CFI failed — fall back to page 1.
+        try { await rendition.display(undefined); } catch { /* ignore */ }
+      }
+
+      // Spinner gone — user sees the book at approximately the right position.
       if (!cancelled) setReady(true);
 
-      // generate() itself can throw IndexSizeError on some EPUBs; catch it so the
-      // reader stays functional at page 1 rather than crashing.
+      // generate() can itself throw IndexSizeError on some EPUBs.
       try {
         await book.locations.generate(1600);
       } catch {
-        // Cannot build location index for this EPUB — navigation and % will be absent,
-        // but the book is still readable. Unlock normal page-turn progress saving.
+        // Location index unavailable — book still readable, progress % won't show.
         locationsReadyRef.current = true;
         return;
       }
 
-      // After generate() we have a valid location index. Use the saved percentage to
-      // derive a fresh, valid CFI and navigate there — no raw stored CFI ever touches
-      // the render queue.
+      // Now we have a valid location index. Derive a fresh, guaranteed-valid CFI
+      // from the saved percentage and jump to the exact position.
       if (!cancelled && renditionRef.current && savedPct > 0) {
         try {
           const targetCfi = book.locations.cfiFromPercentage(savedPct / 100);
           await renditionRef.current.display(targetCfi);
-        } catch { /* bad percentage edge-case — stay at page 1 */ }
+        } catch { /* stay at current position */ }
       }
 
-      // Record the exact landing position with a freshly computed CFI/pct so stale
-      // CFIs in Drive are overwritten on the next save.
+      // Write back the freshly-computed CFI/pct, healing any stale entry in Drive.
       if (!cancelled && renditionRef.current) {
         const loc = renditionRef.current.currentLocation();
         if (loc?.start?.cfi && book.locations.length()) {
           let pct = 0;
-          try {
-            pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100);
-          } catch { /* ignore */ }
+          try { pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100); }
+          catch { /* ignore */ }
           setProgress(pct);
           saveProgress(id, loc.start.cfi, pct);
         }
