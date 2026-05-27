@@ -234,52 +234,9 @@ export default function Reader() {
 
       applyTheme(rendition, 'night', 18);
 
-      // Wire up event handlers BEFORE any display() call so no events are missed.
-      rendition.on('rendered', () => {
-        if (cancelled || !targetLangRef.current) return;
-        translatePage(targetLangRef.current);
-      });
-
-      locationsReadyRef.current = false;
-      rendition.on('relocated', (loc) => {
-        if (cancelled || !locationsReadyRef.current) return;
-        const cfi = loc.start.cfi;
-        let pct = 0;
-        if (book.locations.length()) {
-          try {
-            pct = Math.round(book.locations.percentageFromCfi(cfi) * 100);
-          } catch { /* CFI text-offset out of bounds (e.g. after DOM translation) */ }
-          if (book.locations.total) {
-            try {
-              const locNum = book.locations.locationFromCfi(cfi);
-              setLocDebug(`${locNum ?? '?'} / ${book.locations.total}`);
-            } catch { /* ignore */ }
-          }
-        }
-        setProgress(pct);
-        saveProgress(id, cfi, pct);
-
-        const match = flattenToc(nav.toc).find(
-          (item) => item.href && cfi.includes(item.href.split('#')[0])
-        );
-        setCurrentChapter(match?.label?.trim() || '');
-        requestAnimationFrame(() => {
-          if (!cancelled) pageTextRef.current = capturePageText();
-        });
-        setPageChangeSignal(n => n + 1);
-      });
-
-      rendition.on('keyup', (e) => {
-        if (e.key === 'ArrowRight') renditionRef.current?.next();
-        if (e.key === 'ArrowLeft') renditionRef.current?.prev();
-      });
-
-      if (cancelled) { book.destroy(); return; }
-      const saved = await getProgress(id);
-
-      // Helper: re-attach all event handlers to a rendition instance.
-      // Called once on the initial rendition, and again if we have to rebuild it
-      // after a queue crash.
+      // Helper: attach all event handlers to a rendition instance.
+      // Called on the initial rendition and again if we have to rebuild it
+      // after a CFI queue crash.
       const attachHandlers = (r) => {
         r.on('rendered', () => {
           if (cancelled || !targetLangRef.current) return;
@@ -315,9 +272,11 @@ export default function Reader() {
         });
       };
 
-      // The initial rendition already has its handlers wired above; move them
-      // into attachHandlers so we can re-use on a rebuilt rendition if needed.
-      // (The three .on() calls earlier in the function are now handled here.)
+      // Wire up event handlers BEFORE any display() call so no events are missed.
+      attachHandlers(rendition);
+
+      if (cancelled) { book.destroy(); return; }
+      const saved = await getProgress(id);
 
       // A corrupted CFI (e.g. "offset 85 doesn't exist") causes epubjs to throw
       // IndexSizeError SYNCHRONOUSLY inside its render-queue processor. epubjs
@@ -362,20 +321,28 @@ export default function Reader() {
 
       await book.locations.generate(1600);
 
-      // Re-display at the saved position after generate() — same logic as before:
-      // the location index now lets epubjs land on the exact character offset.
-      // Skip if the CFI was bad (we cleared it above).
-      if (!cancelled && renditionRef.current) {
+      // After the location index is ready, recompute the percentage and update
+      // the progress bar + saved record — but do NOT call display() again.
+      // The first display() above already placed the user on the correct page;
+      // a second display() would cause a visible 2-3 second page jump.
+      if (!cancelled && renditionRef.current && book.locations.length()) {
+        let pct = 0;
         if (!cfiCrashed && saved) {
-          try { await renditionRef.current.display(saved); } catch { /* ignore */ }
-        }
-        const loc = renditionRef.current.currentLocation();
-        if (loc?.start?.cfi && book.locations.length()) {
-          let pct = 0;
-          try { pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100); }
-          catch { /* ignore */ }
+          // Recompute percentage from the original saved CFI — this is the position
+          // that was actually displayed in phase 1, so it stays authoritative.
+          try { pct = Math.round(book.locations.percentageFromCfi(saved) * 100); }
+          catch { /* CFI out of bounds — leave pct at 0 */ }
           setProgress(pct);
-          saveProgress(id, loc.start.cfi, pct);
+          saveProgress(id, saved, pct);
+        } else {
+          // New book (no saved position) or crash recovery: read the current page.
+          const loc = renditionRef.current.currentLocation();
+          if (loc?.start?.cfi) {
+            try { pct = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100); }
+            catch { /* ignore */ }
+            setProgress(pct);
+            saveProgress(id, loc.start.cfi, pct);
+          }
         }
       }
       locationsReadyRef.current = true;
