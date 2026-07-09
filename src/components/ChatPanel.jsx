@@ -21,6 +21,71 @@ function mixHex(hexA, hexB, t) {
   return `#${[r, g, bch].map(v => v.toString(16).padStart(2, '0')).join('')}`;
 }
 
+// Detects `filename.ext` mentions immediately followed by a fenced code
+// block, e.g. the multi-file output produced by custom prompts asking for
+// several distinct documents (exercices.md, solutions.md, ...).
+function extractNamedFiles(text) {
+  const re = /`([\w.-]+\.\w+)`[^\n]*\n+```(?:\w+)?\n([\s\S]*?)```/g;
+  const files = [];
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    files.push({ filename: match[1], content: match[2].trimEnd() });
+  }
+  return files;
+}
+
+function slugify(str) {
+  return str
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'file';
+}
+
+// Fallback for models that don't prefix each file with a `filename.md`
+// marker: splits on top-level ```markdown fences (the ones Gemini uses to
+// wrap each whole document) and names each chunk after its first heading.
+// Fences tagged with another language (```sql, ```python...) inside a
+// document are treated as plain content, not as file boundaries.
+function extractMarkdownDocuments(text) {
+  const openRe = /```markdown\s*\n/gi;
+  const opens = [];
+  let m;
+  while ((m = openRe.exec(text)) !== null) {
+    opens.push({ start: m.index, contentStart: m.index + m[0].length });
+  }
+  if (opens.length < 2) return [];
+
+  return opens.map((open, i) => {
+    const contentEnd = i + 1 < opens.length ? opens[i + 1].start : text.length;
+    const content = text.slice(open.contentStart, contentEnd)
+      .trimEnd()
+      .replace(/```\s*$/, '')
+      .trimEnd();
+    const heading = content.match(/^#\s+(.+)$/m);
+    const filename = `${heading ? slugify(heading[1]) : `file-${i + 1}`}.md`;
+    return { filename, content };
+  });
+}
+
+function extractDownloadableFiles(text) {
+  const named = extractNamedFiles(text);
+  return named.length > 0 ? named : extractMarkdownDocuments(text);
+}
+
+function downloadTextFile(filename, content) {
+  const blob = new Blob([content], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function buildHistory(messages) {
   return messages
     .filter(m => m.role !== 'separator' && m.role !== 'revision-sheet' && !m.isStreaming)
@@ -435,6 +500,10 @@ export default function ChatPanel({
             );
           }
 
+          const detectedFiles = msg.role === 'assistant' && !msg.isStreaming
+            ? extractDownloadableFiles(msg.text)
+            : [];
+
           return (
             <div
               key={msg.id}
@@ -444,6 +513,21 @@ export default function ChatPanel({
                 {msg.text}
                 {msg.isStreaming && <span className={styles.cursor} />}
               </p>
+              {detectedFiles.length > 0 && (
+                <div className={styles.messageDownloads}>
+                  {detectedFiles.map((file, i) => (
+                    <button
+                      key={i}
+                      className={styles.downloadFileBtn}
+                      style={{ color: th.text, borderColor }}
+                      onClick={() => downloadTextFile(file.filename, file.content)}
+                      title={`Download ${file.filename}`}
+                    >
+                      ⬇ {file.filename}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
