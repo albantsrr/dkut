@@ -13,7 +13,7 @@ let _libraryId    = null;
 let _notesheetId  = null;
 let _dataFileId   = null;
 
-const emptyData = () => ({ books: [], progress: {} });
+const emptyData = () => ({ books: [], progress: {}, customPrompts: [] });
 
 async function ensureRoot() {
   if (_rootId) return _rootId;

@@ -1,14 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { streamChatMessage, generateRevisionSheet } from '../lib/geminiApi.js';
 import { saveNotesheet } from '../lib/driveStorage.js';
+import { getAllPrompts, savePrompt, deletePrompt } from '../lib/customPrompts.js';
 import styles from './ChatPanel.module.css';
 
-const SUGGESTED_PROMPTS = [
-  { label: 'Create a revision sheet', action: 'revision-sheet' },
-  { label: 'Explain difficult terms', action: 'chat' },
-  { label: 'Create 3 comprehension questions', action: 'chat' },
-  { label: 'Simplify this passage', action: 'chat' },
-];
+const MIN_DRAWER_HEIGHT = 220;
+const MAX_DRAWER_HEIGHT_RATIO = 0.92;
+
+// Blends two hex colors so the drawer surface reads as distinct from the
+// page background instead of sharing its exact color across every theme.
+function mixHex(hexA, hexB, t) {
+  const a = parseInt(hexA.slice(1), 16);
+  const b = parseInt(hexB.slice(1), 16);
+  const channel = (shift) => {
+    const va = (a >> shift) & 255;
+    const vb = (b >> shift) & 255;
+    return Math.round(va + (vb - va) * t);
+  };
+  const r = channel(16), g = channel(8), bch = channel(0);
+  return `#${[r, g, bch].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+}
 
 function buildHistory(messages) {
   return messages
@@ -36,12 +47,28 @@ export default function ChatPanel({
   const [error, setError] = useState(null);
   // Track save state per revision-sheet message id
   const [saveStates, setSaveStates] = useState({});
+  const [prompts, setPrompts] = useState([]);
+  const [promptsLoaded, setPromptsLoaded] = useState(false);
+  // null = no form open; { id, title, text, type } otherwise (id is null when creating)
+  const [promptForm, setPromptForm] = useState(null);
+  const [drawerHeight, setDrawerHeight] = useState(null); // px override; null = default CSS height
   const streamingAbortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const drawerRef = useRef(null);
+  const resizeStateRef = useRef(null);
 
   useEffect(() => {
     return () => streamingAbortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAllPrompts()
+      .then(list => { if (!cancelled) setPrompts(list); })
+      .catch(err => console.error('[ChatPanel] Failed to load prompts:', err))
+      .finally(() => { if (!cancelled) setPromptsLoaded(true); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -168,15 +195,87 @@ export default function ChatPanel({
     }
   }, []);
 
+  const handleSubmitPromptForm = useCallback(async () => {
+    if (!promptForm) return;
+    const title = promptForm.title.trim();
+    const text = promptForm.text.trim();
+    if (!title || !text) return;
+    const promptData = {
+      id: promptForm.id ?? `custom-${Date.now()}`,
+      title,
+      text,
+      type: promptForm.type ?? 'chat',
+    };
+    try {
+      const updated = await savePrompt(promptData);
+      setPrompts(updated);
+      setPromptForm(null);
+    } catch (err) {
+      console.error('[ChatPanel] Failed to save prompt:', err);
+    }
+  }, [promptForm]);
+
+  const handleDeletePrompt = useCallback(async (id) => {
+    try {
+      const updated = await deletePrompt(id);
+      setPrompts(updated);
+    } catch (err) {
+      console.error('[ChatPanel] Failed to delete prompt:', err);
+    }
+  }, []);
+
+  const handleResizeStart = useCallback((e) => {
+    resizeStateRef.current = {
+      startY: e.clientY,
+      startHeight: drawerRef.current?.getBoundingClientRect().height ?? 0,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const handleResizeMove = useCallback((e) => {
+    if (!resizeStateRef.current) return;
+    const { startY, startHeight } = resizeStateRef.current;
+    const delta = startY - e.clientY; // dragging up enlarges the drawer
+    const maxHeight = window.innerHeight * MAX_DRAWER_HEIGHT_RATIO;
+    const next = Math.min(maxHeight, Math.max(MIN_DRAWER_HEIGHT, startHeight + delta));
+    setDrawerHeight(next);
+  }, []);
+
+  const handleResizeEnd = useCallback((e) => {
+    resizeStateRef.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  }, []);
+
   const th = themeColors;
   const borderColor = th.text + '18';
+  const panelBg = mixHex(th.bg, th.text, 0.07);
+  const drawerBorderColor = th.text + '35';
 
   return (
     <div
+      ref={drawerRef}
       className={`${styles.drawer} ${isOpen ? styles.drawerOpen : ''}`}
-      style={{ background: th.bg + 'f0', borderTopColor: borderColor, pointerEvents: isOpen ? 'auto' : 'none' }}
+      style={{
+        background: panelBg + 'f2',
+        borderTopColor: drawerBorderColor,
+        boxShadow: '0 -14px 34px rgba(0, 0, 0, 0.28)',
+        pointerEvents: isOpen ? 'auto' : 'none',
+        ...(drawerHeight != null ? { height: `${drawerHeight}px` } : {}),
+      }}
       onClick={e => e.stopPropagation()}
     >
+      {/* Resize handle */}
+      <div
+        className={styles.resizeHandle}
+        style={{ color: th.text }}
+        onPointerDown={handleResizeStart}
+        onPointerMove={handleResizeMove}
+        onPointerUp={handleResizeEnd}
+        title="Drag to resize"
+      >
+        <span className={styles.resizeGrip} />
+      </div>
+
       {/* Header */}
       <div
         className={styles.drawerHeader}
@@ -208,26 +307,91 @@ export default function ChatPanel({
 
       {/* Messages */}
       <div className={styles.messages}>
-        {messages.length === 0 && (
+        {messages.length === 0 && promptsLoaded && (
           <div className={styles.emptyState}>
             <p className={styles.emptyHint} style={{ color: th.text }}>
               Suggested prompts
             </p>
-            {SUGGESTED_PROMPTS.map(prompt => (
-              <button
-                key={prompt.label}
-                className={styles.suggestedBtn}
-                style={{ color: th.text, borderColor }}
-                onClick={() =>
-                  prompt.action === 'revision-sheet'
-                    ? handleCreateRevisionSheet()
-                    : handleSend(prompt.label)
-                }
-                disabled={isLoading}
-              >
-                {prompt.label}
-              </button>
+            {prompts.map(prompt => (
+              <div key={prompt.id} className={styles.promptRow}>
+                <button
+                  className={styles.suggestedBtn}
+                  style={{ color: th.text, borderColor }}
+                  onClick={() =>
+                    prompt.type === 'revision-sheet'
+                      ? handleCreateRevisionSheet()
+                      : handleSend(prompt.text)
+                  }
+                  disabled={isLoading}
+                >
+                  {prompt.title}
+                </button>
+                <div className={styles.promptActions}>
+                  <button
+                    className={styles.promptActionBtn}
+                    style={{ color: th.text }}
+                    onClick={() => setPromptForm({ id: prompt.id, title: prompt.title, text: prompt.text, type: prompt.type })}
+                    title="Edit prompt"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    className={styles.promptActionBtn}
+                    style={{ color: th.text }}
+                    onClick={() => handleDeletePrompt(prompt.id)}
+                    title="Delete prompt"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
             ))}
+
+            {promptForm ? (
+              <div className={styles.promptForm} style={{ borderColor }}>
+                <input
+                  className={styles.promptFormInput}
+                  style={{ color: th.text }}
+                  value={promptForm.title}
+                  onChange={e => setPromptForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="Title"
+                  autoFocus
+                />
+                <textarea
+                  className={styles.promptFormTextarea}
+                  style={{ color: th.text }}
+                  value={promptForm.text}
+                  onChange={e => setPromptForm(f => ({ ...f, text: e.target.value }))}
+                  placeholder="Prompt text sent to the assistant"
+                  rows={7}
+                />
+                <div className={styles.promptFormActions}>
+                  <button
+                    className={styles.promptFormCancel}
+                    style={{ color: th.text, borderColor }}
+                    onClick={() => setPromptForm(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className={styles.promptFormSave}
+                    style={{ color: th.text, borderColor }}
+                    onClick={handleSubmitPromptForm}
+                    disabled={!promptForm.title.trim() || !promptForm.text.trim()}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className={styles.addPromptBtn}
+                style={{ color: th.text, borderColor }}
+                onClick={() => setPromptForm({ id: null, title: '', text: '', type: 'chat' })}
+              >
+                + Add prompt
+              </button>
+            )}
           </div>
         )}
 

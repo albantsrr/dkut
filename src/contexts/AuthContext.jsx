@@ -5,6 +5,7 @@ import {
 } from '../lib/googleAuth.js';
 import { resetDriveStorage } from '../lib/driveStorage.js';
 import { resetProgress } from '../lib/progress.js';
+import { resetCustomPrompts } from '../lib/customPrompts.js';
 import { clearAllCache } from '../lib/bookCache.js';
 
 const AuthContext = createContext(null);
@@ -64,6 +65,7 @@ export function AuthProvider({ children }) {
     gSignOut();
     resetDriveStorage();
     resetProgress();
+    resetCustomPrompts();
     await clearAllCache();
     setUser(null);
   }, []);

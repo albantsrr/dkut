@@ -5,8 +5,8 @@
   left: 0;
   right: 0;
   height: 50vh;
-  min-height: 320px;
-  max-height: 70vh;
+  min-height: 220px;
+  max-height: 92vh;
   z-index: 60;
   border-top: 1px solid;
   display: flex;
@@ -19,6 +19,31 @@
 
 .drawerOpen {
   transform: translateY(0);
+}
+
+/* Resize handle */
+.resizeHandle {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 14px;
+  cursor: ns-resize;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.resizeGrip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.25;
+  transition: opacity 0.15s ease;
+}
+
+.resizeHandle:hover .resizeGrip,
+.resizeHandle:active .resizeGrip {
+  opacity: 0.6;
 }
 
 /* Header */
@@ -139,6 +164,133 @@
   background: rgba(200, 169, 110, 0.07);
 }
 
+.promptRow {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 360px;
+  width: 100%;
+}
+
+.promptRow .suggestedBtn {
+  flex: 1;
+}
+
+.promptActions {
+  display: flex;
+  gap: 0.2rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.promptRow:hover .promptActions {
+  opacity: 0.7;
+}
+
+.promptActionBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.3rem;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+  line-height: 1;
+}
+
+.promptActionBtn:hover {
+  opacity: 1;
+}
+
+.addPromptBtn {
+  background: none;
+  border: 1px dashed;
+  border-radius: 2px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+  margin-top: 0.25rem;
+}
+
+.addPromptBtn:hover {
+  opacity: 0.9;
+  background: rgba(200, 169, 110, 0.06);
+}
+
+.promptForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 560px;
+  width: 100%;
+  border: 1px solid;
+  border-radius: 3px;
+  padding: 1rem;
+  margin-top: 0.25rem;
+}
+
+.promptFormInput,
+.promptFormTextarea {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-body);
+}
+
+.promptFormInput {
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(200, 169, 110, 0.2);
+  padding: 0.4rem 0.1rem;
+}
+
+.promptFormTextarea {
+  font-size: 0.88rem;
+  line-height: 1.6;
+  resize: vertical;
+  min-height: 9rem;
+}
+
+.promptFormActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.promptFormCancel,
+.promptFormSave {
+  background: none;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+
+.promptFormCancel:hover,
+.promptFormSave:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.promptFormSave:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 /* Message bubbles */
 .message {
   max-width: 82%;
@@ -239,7 +391,7 @@
   outline: none;
   resize: none;
   font-family: var(--font-display);
-  font-size: 0.92rem;
+  font-size: 1.05rem;
   font-style: italic;
   line-height: 1.55;
   max-height: 6rem;
