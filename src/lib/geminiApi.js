@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-3.5-flash';
 
 function buildSystemInstruction(title, author, chapter) {
   return `Tu es un assistant de lecture utile. Réponds toujours en français, quelle que soit la langue de l'utilisateur.
