@@ -148,11 +148,11 @@ export default function ChatPanel({
   }, [inputValue]);
 
   useEffect(() => {
-    if (pageChangeSignal === 0 || messages.length === 0) return;
-    setMessages(prev => [
-      ...prev,
-      { id: Date.now(), role: 'separator', text: 'New page' },
-    ]);
+    if (pageChangeSignal === 0) return;
+    setMessages(prev => {
+      if (prev.length === 0 || prev[prev.length - 1].role === 'separator') return prev;
+      return [...prev, { id: Date.now(), role: 'separator', text: 'New page' }];
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageChangeSignal]);
 
