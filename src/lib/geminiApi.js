@@ -38,10 +38,7 @@ export async function* streamChatMessage({
 
   const chat = model.startChat({
     history,
-    // thinkingBudget: 0 disables Gemini 2.5's hidden reasoning tokens, which
-    // otherwise eat into maxOutputTokens and truncate long responses before
-    // any visible text is written.
-    generationConfig: { maxOutputTokens: 32768, temperature: 0.7, thinkingConfig: { thinkingBudget: 0 } },
+    generationConfig: { maxOutputTokens: 32768, temperature: 0.7 },
   });
 
   const result = await chat.sendMessageStream(buildUserMessage(userMessage, pageText));
@@ -70,7 +67,7 @@ export async function generateRevisionSheet({
   const model = genAI.getGenerativeModel({
     model: MODEL,
     systemInstruction: 'Tu es un assistant académique. Crée des fiches de révision structurées et concises. Réponds toujours en français. Utilise du Markdown simple avec des titres ## et des listes à puces.',
-    generationConfig: { maxOutputTokens: 32768, temperature: 0.5, thinkingConfig: { thinkingBudget: 0 } },
+    generationConfig: { maxOutputTokens: 32768, temperature: 0.5 },
   });
 
   const chapterLabel = chapterName || 'Chapitre';
