@@ -40,13 +40,18 @@ function mixHex(hexA, hexB, t) {
 // block, e.g. the multi-file output produced by custom prompts asking for
 // several distinct documents (exercices.md, solutions.md, ...).
 function extractNamedFiles(text) {
-  const re = /`([\w.-]+\.\w+)`[^\n]*\n+```(?:\w+)?\n([\s\S]*?)```/g;
-  const files = [];
+  const markerRe = /`([\w.-]+\.\w+)`[^\n]*\n+```(?:\w+)?\n/g;
+  const opens = [];
   let match;
-  while ((match = re.exec(text)) !== null) {
-    files.push({ filename: match[1], content: match[2].trimEnd() });
+  while ((match = markerRe.exec(text)) !== null) {
+    opens.push({ filename: match[1], matchStart: match.index, contentStart: match.index + match[0].length });
   }
-  return files;
+  return opens.map((open, i) => {
+    const segmentEnd = i + 1 < opens.length ? opens[i + 1].matchStart : text.length;
+    let content = text.slice(open.contentStart, segmentEnd).trimEnd();
+    if (content.endsWith('```')) content = content.slice(0, -3).trimEnd();
+    return { filename: open.filename, content };
+  });
 }
 
 function slugify(str) {
