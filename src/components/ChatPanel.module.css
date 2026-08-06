@@ -307,6 +307,65 @@
   white-space: pre-wrap;
 }
 
+.mdBody > *:first-child {
+  margin-top: 0;
+}
+
+.mdBody > *:last-child {
+  margin-bottom: 0;
+}
+
+.mdP {
+  margin: 0 0 0.6rem;
+}
+
+.mdHeading {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  margin: 0.9rem 0 0.4rem;
+}
+
+.mdList {
+  margin: 0 0 0.6rem;
+  padding-left: 1.15rem;
+}
+
+.mdListItem {
+  font-family: var(--font-body);
+  font-size: 0.855rem;
+  line-height: 1.68;
+}
+
+.mdStrong {
+  font-weight: 700;
+}
+
+.mdInlineCode {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  background: rgba(200, 169, 110, 0.12);
+  border-radius: 2px;
+  padding: 0.08em 0.32em;
+}
+
+.mdPre {
+  margin: 0 0 0.6rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  overflow-x: auto;
+}
+
+.mdCodeBlock {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+
 .userMsg {
   align-self: flex-end;
   background: rgba(200, 169, 110, 0.10);

@@ -1,8 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { streamChatMessage, generateRevisionSheet } from '../lib/geminiApi.js';
 import { saveNotesheet } from '../lib/driveStorage.js';
 import { getAllPrompts, savePrompt, deletePrompt } from '../lib/customPrompts.js';
 import styles from './ChatPanel.module.css';
+
+const markdownComponents = {
+  p: ({ node, ...props }) => <p className={styles.mdP} {...props} />,
+  ul: ({ node, ...props }) => <ul className={styles.mdList} {...props} />,
+  ol: ({ node, ...props }) => <ol className={styles.mdList} {...props} />,
+  li: ({ node, ...props }) => <li className={styles.mdListItem} {...props} />,
+  h1: ({ node, ...props }) => <h1 className={styles.mdHeading} {...props} />,
+  h2: ({ node, ...props }) => <h2 className={styles.mdHeading} {...props} />,
+  h3: ({ node, ...props }) => <h3 className={styles.mdHeading} {...props} />,
+  strong: ({ node, ...props }) => <strong className={styles.mdStrong} {...props} />,
+  code: ({ node, inline, ...props }) =>
+    inline ? <code className={styles.mdInlineCode} {...props} /> : <code className={styles.mdCodeBlock} {...props} />,
+  pre: ({ node, ...props }) => <pre className={styles.mdPre} {...props} />,
+};
 
 const MIN_DRAWER_HEIGHT = 220;
 const MAX_DRAWER_HEIGHT_RATIO = 0.92;
@@ -509,10 +524,16 @@ export default function ChatPanel({
               key={msg.id}
               className={`${styles.message} ${msg.role === 'user' ? styles.userMsg : styles.assistantMsg}`}
             >
-              <p style={{ color: th.text }}>
-                {msg.text}
-                {msg.isStreaming && <span className={styles.cursor} />}
-              </p>
+              <div className={styles.mdBody} style={{ color: th.text }}>
+                {msg.isStreaming ? (
+                  <p className={styles.mdP}>
+                    {msg.text}
+                    <span className={styles.cursor} />
+                  </p>
+                ) : (
+                  <ReactMarkdown components={markdownComponents}>{msg.text}</ReactMarkdown>
+                )}
+              </div>
               {detectedFiles.length > 0 && (
                 <div className={styles.messageDownloads}>
                   {detectedFiles.map((file, i) => (
