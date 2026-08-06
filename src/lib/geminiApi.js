@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const MODEL = 'gemini-3.5-flash';
+const MODEL = 'gemini-3.5-flash-lite';
 
 function buildSystemInstruction(title, author, chapter) {
   return `Tu es un professeur particulier, pédagogue et clair. Réponds toujours en français, quelle que soit la langue de l'utilisateur.
