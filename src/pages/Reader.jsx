@@ -53,6 +53,11 @@ const LANGUAGES = [
   { code: 'fi', label: 'Suomi' },
 ];
 
+// Preserves section boundaries when capturePageText() flattens the chapter
+// DOM to plain text, so the AI context keeps heading structure instead of
+// an undifferentiated wall of paragraphs.
+const HEADING_PREFIX = { H1: '# ', H2: '## ', H3: '### ', H4: '#### ', H5: '##### ', H6: '###### ' };
+
 // Module-level cache persists across book navigation
 const _translationCache = new Map();
 
@@ -148,7 +153,11 @@ export default function Reader() {
       return Array.from(
         doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote')
       )
-        .map(el => el.textContent.trim())
+        .map(el => {
+          const text = el.textContent.trim();
+          const prefix = HEADING_PREFIX[el.tagName];
+          return prefix ? `\n${prefix}${text}` : text;
+        })
         .filter(t => t.length > 2)
         .join('\n');
     } catch {

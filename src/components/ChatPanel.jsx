@@ -41,17 +41,26 @@ function mixHex(hexA, hexB, t) {
 // several distinct documents (exercices.md, solutions.md, ...).
 function extractNamedFiles(text) {
   const markerRe = /`([\w.-]+\.\w+)`[^\n]*\n+```(?:\w+)?\n/g;
-  const opens = [];
+  // Matches a bare line of backticks (closing fence) or backticks + a
+  // language tag (nested opening fence, e.g. the ```python example inside
+  // each fiche) so we can track fence depth and stop at the file's own
+  // closing fence instead of at the next file's marker.
+  const fenceLineRe = /^```(\w*)\s*$/gm;
+  const files = [];
   let match;
   while ((match = markerRe.exec(text)) !== null) {
-    opens.push({ filename: match[1], matchStart: match.index, contentStart: match.index + match[0].length });
+    const contentStart = match.index + match[0].length;
+    fenceLineRe.lastIndex = contentStart;
+    let depth = 1;
+    let contentEnd = text.length;
+    let fenceMatch;
+    while ((fenceMatch = fenceLineRe.exec(text)) !== null) {
+      depth += fenceMatch[1] ? 1 : -1;
+      if (depth === 0) { contentEnd = fenceMatch.index; break; }
+    }
+    files.push({ filename: match[1], content: text.slice(contentStart, contentEnd).trimEnd() });
   }
-  return opens.map((open, i) => {
-    const segmentEnd = i + 1 < opens.length ? opens[i + 1].matchStart : text.length;
-    let content = text.slice(open.contentStart, segmentEnd).trimEnd();
-    if (content.endsWith('```')) content = content.slice(0, -3).trimEnd();
-    return { filename: open.filename, content };
-  });
+  return files;
 }
 
 function slugify(str) {
@@ -140,6 +149,7 @@ export default function ChatPanel({
   const streamingAbortRef = useRef(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const promptTextareaRef = useRef(null);
   const drawerRef = useRef(null);
   const resizeStateRef = useRef(null);
 
@@ -166,6 +176,23 @@ export default function ChatPanel({
       textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
   }, [inputValue]);
+
+  useEffect(() => {
+    if (promptTextareaRef.current) {
+      promptTextareaRef.current.style.height = 'auto';
+      promptTextareaRef.current.style.height = promptTextareaRef.current.scrollHeight + 'px';
+    }
+  }, [promptForm?.text]);
+
+  // Editing a custom prompt (often a long, multi-paragraph one) is cramped in
+  // the default drawer height — give it the full resizable range so there's
+  // an actual overview instead of a tiny scrolling box.
+  const isEditingPrompt = promptForm !== null;
+  useEffect(() => {
+    if (!isEditingPrompt) return;
+    const roomyHeight = window.innerHeight * MAX_DRAWER_HEIGHT_RATIO;
+    setDrawerHeight(h => (h == null || h < roomyHeight ? roomyHeight : h));
+  }, [isEditingPrompt]);
 
   useEffect(() => {
     if (pageChangeSignal === 0) return;
@@ -443,12 +470,12 @@ export default function ChatPanel({
                   autoFocus
                 />
                 <textarea
+                  ref={promptTextareaRef}
                   className={styles.promptFormTextarea}
                   style={{ color: th.text }}
                   value={promptForm.text}
                   onChange={e => setPromptForm(f => ({ ...f, text: e.target.value }))}
                   placeholder="Prompt text sent to the assistant"
-                  rows={7}
                 />
                 <div className={styles.promptFormActions}>
                   <button
