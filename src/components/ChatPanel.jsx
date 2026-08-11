@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { streamChatMessage, generateRevisionSheet } from '../lib/geminiApi.js';
+import { streamChatMessage, generateRevisionSheet, generateRevisionSet, generateSheetForConcept } from '../lib/geminiApi.js';
 import { saveNotesheet } from '../lib/driveStorage.js';
 import { getAllPrompts, savePrompt, deletePrompt } from '../lib/customPrompts.js';
 import styles from './ChatPanel.module.css';
@@ -115,9 +115,33 @@ function downloadTextFile(filename, content) {
   URL.revokeObjectURL(url);
 }
 
+// Browsers throttle/warn on many downloads fired in the same tick from one
+// click, so stagger them slightly instead of looping synchronously. Keeps the
+// same numbering as the per-card download button (based on position in the
+// full plan, not among only the done ones) so filenames stay consistent
+// whether a sheet is downloaded individually or as part of the batch.
+function downloadAllSheets(cards) {
+  const orderPrefixLength = String(cards.length).length;
+  const doneEntries = cards
+    .map((card, i) => ({ card, orderPrefix: String(i + 1).padStart(orderPrefixLength, '0') }))
+    .filter(({ card }) => card.status === 'done');
+  doneEntries.forEach(({ card, orderPrefix }, i) => {
+    setTimeout(() => {
+      downloadTextFile(`${orderPrefix}-${card.slug || slugify(card.title)}.md`, card.text);
+    }, i * 200);
+  });
+}
+
+const CARD_STATUS_CLASS = {
+  pending: 'cardStatusPending',
+  generating: 'cardStatusGenerating',
+  done: 'cardStatusDone',
+  error: 'cardStatusError',
+};
+
 function buildHistory(messages) {
   return messages
-    .filter(m => m.role !== 'separator' && m.role !== 'revision-sheet' && !m.isStreaming)
+    .filter(m => m.role !== 'separator' && m.role !== 'revision-sheet' && m.role !== 'revision-set' && !m.isStreaming)
     .slice(-20)
     .map(m => ({
       role: m.role === 'user' ? 'user' : 'model',
@@ -145,6 +169,7 @@ export default function ChatPanel({
   const [promptsLoaded, setPromptsLoaded] = useState(false);
   // null = no form open; { id, title, text, type } otherwise (id is null when creating)
   const [promptForm, setPromptForm] = useState(null);
+  const [confirmDeletePrompt, setConfirmDeletePrompt] = useState(null);
   const [drawerHeight, setDrawerHeight] = useState(null); // px override; null = default CSS height
   const streamingAbortRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -296,6 +321,96 @@ export default function ChatPanel({
     }
   }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
 
+  const handleCreateRevisionSet = useCallback(async () => {
+    if (isLoading) return;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    setError(null);
+    setIsLoading(true);
+
+    const setId = Date.now();
+    const setTitle = `${chapterName || bookTitle || 'Chapter'} — Fiches de révision`;
+    setMessages(prev => [...prev, { id: setId, role: 'revision-set', title: setTitle, phase: 'planning', cards: [] }]);
+
+    const controller = new AbortController();
+    streamingAbortRef.current = controller;
+
+    const patchSet = (fn) => setMessages(prev => prev.map(m => (m.id === setId ? fn(m) : m)));
+    const patchCard = (index, patch) =>
+      patchSet(m => ({ ...m, cards: m.cards.map((c, i) => (i === index ? { ...c, ...patch } : c)) }));
+
+    try {
+      const pageText = getPageText();
+      for await (const event of generateRevisionSet({
+        apiKey, pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
+      })) {
+        switch (event.type) {
+          case 'plan':
+            patchSet(m => ({
+              ...m,
+              phase: 'generating',
+              cards: event.sheets.map(s => ({ ...s, status: 'pending', text: '' })),
+            }));
+            break;
+          case 'sheet-start':
+            patchCard(event.index, { status: 'generating' });
+            break;
+          case 'sheet-done':
+            patchCard(event.index, { status: 'done', text: event.text });
+            break;
+          case 'sheet-error':
+            patchCard(event.index, { status: 'error', errorMessage: event.error });
+            break;
+          case 'plan-error':
+            patchSet(m => ({ ...m, phase: 'error' }));
+            setError(event.error || 'NETWORK');
+            break;
+          case 'aborted':
+          case 'done':
+            patchSet(m => ({ ...m, phase: 'done' }));
+            break;
+          default:
+            break;
+        }
+      }
+    } catch (err) {
+      console.error('[ChatPanel] Revision set error:', err);
+      const code = err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK';
+      setError(code);
+      patchSet(m => ({ ...m, phase: 'error' }));
+    } finally {
+      setIsLoading(false);
+      streamingAbortRef.current = null;
+    }
+  }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
+
+  const handleRetryCard = useCallback(async (setId, index) => {
+    const setMsg = messages.find(m => m.id === setId);
+    const sheet = setMsg?.cards?.[index];
+    if (!sheet) return;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+    setMessages(prev => prev.map(m =>
+      m.id === setId
+        ? { ...m, cards: m.cards.map((c, i) => (i === index ? { ...c, status: 'generating', errorMessage: undefined } : c)) }
+        : m
+    ));
+    try {
+      const pageText = getPageText();
+      const text = await generateSheetForConcept({ apiKey, pageText, bookTitle, bookAuthor, chapterName, sheet });
+      setMessages(prev => prev.map(m =>
+        m.id === setId
+          ? { ...m, cards: m.cards.map((c, i) => (i === index ? { ...c, status: 'done', text } : c)) }
+          : m
+      ));
+    } catch (err) {
+      setMessages(prev => prev.map(m =>
+        m.id === setId
+          ? { ...m, cards: m.cards.map((c, i) => (i === index ? { ...c, status: 'error', errorMessage: err.message || 'NETWORK' } : c)) }
+          : m
+      ));
+    }
+  }, [messages, bookTitle, bookAuthor, chapterName, getPageText]);
+
   const handleSaveSheet = useCallback(async (msg) => {
     setSaveStates(prev => ({ ...prev, [msg.id]: 'saving' }));
     try {
@@ -328,13 +443,19 @@ export default function ChatPanel({
   }, [promptForm]);
 
   const handleDeletePrompt = useCallback(async (id) => {
+    if (confirmDeletePrompt !== id) {
+      setConfirmDeletePrompt(id);
+      setTimeout(() => setConfirmDeletePrompt(prev => (prev === id ? null : prev)), 3000);
+      return;
+    }
+    setConfirmDeletePrompt(null);
     try {
       const updated = await deletePrompt(id);
       setPrompts(updated);
     } catch (err) {
       console.error('[ChatPanel] Failed to delete prompt:', err);
     }
-  }, []);
+  }, [confirmDeletePrompt]);
 
   const handleResizeStart = useCallback((e) => {
     resizeStateRef.current = {
@@ -427,15 +548,17 @@ export default function ChatPanel({
             {prompts.map(prompt => (
               <div key={prompt.id} className={styles.promptRow}>
                 <button
-                  className={styles.suggestedBtn}
+                  className={`${styles.suggestedBtn} ${prompt.type === 'revision-set' ? styles.suggestedBtnMultiStep : ''}`}
                   style={{ color: th.text, borderColor }}
-                  onClick={() =>
-                    prompt.type === 'revision-sheet'
-                      ? handleCreateRevisionSheet()
-                      : handleSend(prompt.text)
-                  }
+                  onClick={() => {
+                    if (prompt.type === 'revision-sheet') return handleCreateRevisionSheet();
+                    if (prompt.type === 'revision-set') return handleCreateRevisionSet();
+                    return handleSend(prompt.text);
+                  }}
                   disabled={isLoading}
+                  title={prompt.type === 'revision-set' ? 'Génère plusieurs fiches (un appel par concept, ~1 min)' : undefined}
                 >
+                  {prompt.type === 'revision-set' && <span aria-hidden="true">⚡ </span>}
                   {prompt.title}
                 </button>
                 <div className={styles.promptActions}>
@@ -448,12 +571,12 @@ export default function ChatPanel({
                     ✎
                   </button>
                   <button
-                    className={styles.promptActionBtn}
-                    style={{ color: th.text }}
+                    className={`${styles.promptActionBtn} ${confirmDeletePrompt === prompt.id ? styles.promptActionBtnConfirm : ''}`}
+                    style={confirmDeletePrompt === prompt.id ? undefined : { color: th.text }}
                     onClick={() => handleDeletePrompt(prompt.id)}
-                    title="Delete prompt"
+                    title={confirmDeletePrompt === prompt.id ? 'Confirm deletion' : 'Delete prompt'}
                   >
-                    ✕
+                    {confirmDeletePrompt === prompt.id ? '✕ Confirm' : '✕'}
                   </button>
                 </div>
               </div>
@@ -542,6 +665,114 @@ export default function ChatPanel({
                       {!saveState && 'Save to Drive'}
                     </button>
                   </>
+                )}
+              </div>
+            );
+          }
+
+          if (msg.role === 'revision-set') {
+            const doneCount = msg.cards.filter(c => c.status === 'done').length;
+            const errorCount = msg.cards.filter(c => c.status === 'error').length;
+            return (
+              <div key={msg.id} className={styles.revisionSet} style={{ borderLeftColor: '#c8a96e', background: th.bg }}>
+                <div className={styles.revisionSetHeader}>
+                  <p className={styles.revisionTitle} style={{ color: th.text }}>{msg.title}</p>
+                  {(msg.phase === 'planning' || msg.phase === 'generating') && (
+                    <button
+                      className={styles.stopSetBtn}
+                      style={{ color: th.text, borderColor }}
+                      onClick={() => streamingAbortRef.current?.abort()}
+                    >
+                      Stop
+                    </button>
+                  )}
+                  {doneCount > 0 && msg.phase !== 'planning' && msg.phase !== 'generating' && (
+                    <button
+                      className={styles.downloadAllBtn}
+                      style={{ color: th.text, borderColor }}
+                      onClick={() => downloadAllSheets(msg.cards)}
+                      title={`Download all ${doneCount} sheets`}
+                    >
+                      ⬇ Tout télécharger
+                    </button>
+                  )}
+                </div>
+
+                {msg.phase === 'planning' && <span className={styles.loadingDot} />}
+                {msg.phase === 'error' && msg.cards.length === 0 && (
+                  <p className={styles.revisionSetStatus} style={{ color: th.text }}>
+                    Échec de la planification des fiches.
+                  </p>
+                )}
+
+                {msg.cards.length > 0 && (
+                  <div className={styles.revisionSetCards}>
+                    {msg.cards.map((card, i) => {
+                      const cardSaveKey = `${msg.id}-${i}`;
+                      const saveState = saveStates[cardSaveKey];
+                      const orderPrefix = String(i + 1).padStart(String(msg.cards.length).length, '0');
+                      return (
+                        <div
+                          key={card.slug ?? i}
+                          className={`${styles.revisionCard} ${styles[CARD_STATUS_CLASS[card.status]] || ''}`}
+                          style={{ borderColor }}
+                        >
+                          <p className={styles.revisionCardTitle} style={{ color: th.text }}>{card.title}</p>
+                          {card.status === 'pending' && (
+                            <span className={styles.cardStatusLabel} style={{ color: th.text }}>En attente…</span>
+                          )}
+                          {card.status === 'generating' && <span className={styles.loadingDot} />}
+                          {card.status === 'error' && (
+                            <div className={styles.cardErrorBox}>
+                              <span className={styles.cardStatusLabel} style={{ color: th.text }}>
+                                Échec — {card.errorMessage}
+                              </span>
+                              <button
+                                className={styles.retryCardBtn}
+                                style={{ color: th.text, borderColor }}
+                                onClick={() => handleRetryCard(msg.id, i)}
+                              >
+                                Réessayer
+                              </button>
+                            </div>
+                          )}
+                          {card.status === 'done' && (
+                            <>
+                              <pre className={styles.revisionContent} style={{ color: th.text }}>{card.text}</pre>
+                              <div className={styles.cardActions}>
+                                <button
+                                  className={styles.downloadFileBtn}
+                                  style={{ color: th.text, borderColor }}
+                                  onClick={() => downloadTextFile(`${orderPrefix}-${card.slug || slugify(card.title)}.md`, card.text)}
+                                  title={`Download ${orderPrefix}-${card.slug || slugify(card.title)}.md`}
+                                >
+                                  ⬇ Télécharger
+                                </button>
+                                <button
+                                  className={styles.saveSheetBtn}
+                                  style={{ color: th.text, borderColor }}
+                                  onClick={() => handleSaveSheet({ id: cardSaveKey, title: `${orderPrefix} - ${card.title}`, text: card.text })}
+                                  disabled={saveState === 'saving' || saveState === 'saved'}
+                                >
+                                  {saveState === 'saving' && 'Saving…'}
+                                  {saveState === 'saved' && 'Saved to Drive ✓'}
+                                  {saveState === 'error' && 'Save failed — retry'}
+                                  {!saveState && 'Save to Drive'}
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {msg.phase === 'done' && msg.cards.length > 0 && (
+                  <p className={styles.revisionSetSummary} style={{ color: th.text }}>
+                    {doneCount}/{msg.cards.length} fiches générées
+                    {errorCount > 0 ? `, ${errorCount} échec${errorCount > 1 ? 's' : ''}` : ''}.
+                  </p>
                 )}
               </div>
             );

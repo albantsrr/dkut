@@ -203,6 +203,11 @@
   opacity: 1;
 }
 
+.promptActionBtnConfirm {
+  opacity: 1 !important;
+  color: #e07070 !important;
+}
+
 .addPromptBtn {
   background: none;
   border: 1px dashed;
@@ -579,4 +584,156 @@
 
 .saveSheetBtn:disabled {
   cursor: default;
+}
+
+/* Suggested prompt that triggers a longer, multi-call generation */
+.suggestedBtnMultiStep {
+  border-style: dashed;
+}
+
+/* Revision set (multi-fiche generation) */
+.revisionSet {
+  align-self: stretch;
+  border-left: 2px solid;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0 3px 3px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-top: 1px solid rgba(200, 169, 110, 0.15);
+  border-right: 1px solid rgba(200, 169, 110, 0.08);
+  border-bottom: 1px solid rgba(200, 169, 110, 0.08);
+}
+
+.revisionSetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.stopSetBtn {
+  background: none;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.stopSetBtn:hover {
+  opacity: 1;
+  background: rgba(200, 169, 110, 0.07);
+}
+
+.downloadAllBtn {
+  background: none;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.downloadAllBtn:hover {
+  opacity: 1;
+  background: rgba(200, 169, 110, 0.07);
+}
+
+.revisionSetStatus,
+.revisionSetSummary {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.revisionSetCards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.revisionCard {
+  border: 1px solid;
+  border-radius: 3px;
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.revisionCardTitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.cardStatusPending {
+  opacity: 0.5;
+}
+
+.cardStatusGenerating {
+  border-color: rgba(200, 169, 110, 0.5);
+}
+
+.cardStatusDone {
+  border-color: rgba(200, 169, 110, 0.2);
+}
+
+.cardStatusError {
+  border-color: rgba(214, 110, 90, 0.5);
+}
+
+.cardStatusLabel {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+
+.cardErrorBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.retryCardBtn {
+  background: none;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+
+.retryCardBtn:hover {
+  opacity: 1;
+  background: rgba(200, 169, 110, 0.07);
+}
+
+.cardActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }

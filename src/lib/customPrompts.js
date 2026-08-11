@@ -2,6 +2,7 @@ import { loadData, saveData } from './driveStorage.js';
 
 const DEFAULT_PROMPTS = [
   { id: 'default-revision-sheet', title: 'Create a revision sheet', text: 'Create a revision sheet', type: 'revision-sheet' },
+  { id: 'default-revision-set', title: 'Générer les fiches de révision du chapitre', text: '', type: 'revision-set' },
   { id: 'default-explain-terms', title: 'Explain difficult terms', text: 'Explain difficult terms', type: 'chat' },
   { id: 'default-comprehension', title: 'Create 3 comprehension questions', text: 'Create 3 comprehension questions', type: 'chat' },
   { id: 'default-simplify', title: 'Simplify this passage', text: 'Simplify this passage', type: 'chat' },
@@ -15,7 +16,17 @@ async function ensurePrompts() {
   if (_prompts) return;
   const data = await loadData();
   if (data.customPrompts) {
-    _prompts = data.customPrompts;
+    // Merge in any DEFAULT_PROMPTS added after this user's data file already
+    // existed (matched by id) — otherwise a newly introduced default prompt
+    // would never appear for existing users, since only a missing
+    // `customPrompts` triggers the full-seed branch below.
+    const existingIds = new Set(data.customPrompts.map(p => p.id));
+    const missingDefaults = DEFAULT_PROMPTS.filter(p => !existingIds.has(p.id));
+    _prompts = missingDefaults.length > 0 ? [...data.customPrompts, ...missingDefaults] : data.customPrompts;
+    if (missingDefaults.length > 0) {
+      data.customPrompts = _prompts;
+      await saveData(data);
+    }
   } else {
     // First load on a Drive data file created before this feature existed —
     // seed with today's defaults and persist once so they become editable.

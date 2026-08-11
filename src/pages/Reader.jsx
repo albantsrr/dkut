@@ -151,10 +151,11 @@ export default function Reader() {
       const doc = iframe?.contentDocument;
       if (!doc?.body) return '';
       return Array.from(
-        doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote')
+        doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre')
       )
         .map(el => {
           const text = el.textContent.trim();
+          if (el.tagName === 'PRE') return `\n\`\`\`\n${text}\n\`\`\``;
           const prefix = HEADING_PREFIX[el.tagName];
           return prefix ? `\n${prefix}${text}` : text;
         })
