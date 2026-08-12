@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { streamChatMessage, generateRevisionSheet, generateRevisionSet, generateSheetForConcept } from '../lib/geminiApi.js';
+import { streamChatMessage, generateRevisionSheet, generateRevisionSet, generateSheetForConcept, generateInterviewPrep, generateLearningPackage } from '../lib/geminiApi.js';
 import { saveNotesheet } from '../lib/driveStorage.js';
 import { getAllPrompts, savePrompt, deletePrompt } from '../lib/customPrompts.js';
 import styles from './ChatPanel.module.css';
@@ -141,7 +141,7 @@ const CARD_STATUS_CLASS = {
 
 function buildHistory(messages) {
   return messages
-    .filter(m => m.role !== 'separator' && m.role !== 'revision-sheet' && m.role !== 'revision-set' && !m.isStreaming)
+    .filter(m => m.role !== 'separator' && m.role !== 'revision-sheet' && m.role !== 'revision-set' && m.role !== 'interview-prep' && m.role !== 'learning-package' && !m.isStreaming)
     .slice(-20)
     .map(m => ({
       role: m.role === 'user' ? 'user' : 'model',
@@ -383,11 +383,128 @@ export default function ChatPanel({
     }
   }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
 
+  const handleCreateInterviewPrep = useCallback(async () => {
+    if (isLoading) return;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    setError(null);
+    setIsLoading(true);
+
+    const sheetId = Date.now();
+    const title = `${chapterName || bookTitle || 'Chapter'} — Préparation d'entretien`;
+
+    setMessages(prev => [...prev, { id: sheetId, role: 'interview-prep', text: '', title, isGenerating: true }]);
+
+    try {
+      const pageText = getPageText();
+      const text = await generateInterviewPrep({
+        apiKey,
+        pageText,
+        bookTitle,
+        bookAuthor,
+        chapterName,
+      });
+      setMessages(prev =>
+        prev.map(m => (m.id === sheetId ? { ...m, text, isGenerating: false } : m))
+      );
+    } catch (err) {
+      console.error('[ChatPanel] Interview prep error:', err);
+      const code = err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK';
+      setError(code);
+      setMessages(prev => prev.filter(m => m.id !== sheetId));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
+
+  const handleCreateLearningPackage = useCallback(async () => {
+    if (isLoading) return;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    setError(null);
+    setIsLoading(true);
+
+    const setId = Date.now();
+    const setTitle = `${chapterName || bookTitle || 'Chapter'} — Pack d'exercices`;
+    setMessages(prev => [...prev, {
+      id: setId,
+      role: 'learning-package',
+      title: setTitle,
+      phase: 'generating',
+      cards: [
+        { slug: 'exercices', title: 'Exercices', status: 'pending', text: '' },
+        { slug: 'solutions', title: 'Solutions', status: 'pending', text: '' },
+      ],
+    }]);
+
+    const controller = new AbortController();
+    streamingAbortRef.current = controller;
+
+    const patchSet = (fn) => setMessages(prev => prev.map(m => (m.id === setId ? fn(m) : m)));
+
+    try {
+      const pageText = getPageText();
+      const { exercises, solutions } = await generateLearningPackage({
+        apiKey, pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
+      });
+      patchSet(m => ({
+        ...m,
+        phase: 'done',
+        cards: [
+          { ...m.cards[0], status: 'done', text: exercises },
+          { ...m.cards[1], status: 'done', text: solutions },
+        ],
+      }));
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        patchSet(m => ({ ...m, phase: 'done' }));
+      } else {
+        console.error('[ChatPanel] Learning package error:', err);
+        const code = err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK';
+        setError(code);
+        patchSet(m => ({
+          ...m,
+          phase: 'error',
+          cards: m.cards.map(c => ({ ...c, status: 'error', errorMessage: code })),
+        }));
+      }
+    } finally {
+      setIsLoading(false);
+      streamingAbortRef.current = null;
+    }
+  }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
+
   const handleRetryCard = useCallback(async (setId, index) => {
     const setMsg = messages.find(m => m.id === setId);
     const sheet = setMsg?.cards?.[index];
     if (!sheet) return;
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+    // Exercices/solutions are generated together in one paired call — a
+    // single card can't be regenerated in isolation without breaking the
+    // exercise/solution numbering match, so retry re-runs the whole pair.
+    if (setMsg.role === 'learning-package') {
+      setMessages(prev => prev.map(m =>
+        m.id === setId
+          ? { ...m, phase: 'generating', cards: m.cards.map(c => ({ ...c, status: 'generating', errorMessage: undefined })) }
+          : m
+      ));
+      try {
+        const pageText = getPageText();
+        const { exercises, solutions } = await generateLearningPackage({ apiKey, pageText, bookTitle, bookAuthor, chapterName });
+        setMessages(prev => prev.map(m =>
+          m.id === setId
+            ? { ...m, phase: 'done', cards: [{ ...m.cards[0], status: 'done', text: exercises }, { ...m.cards[1], status: 'done', text: solutions }] }
+            : m
+        ));
+      } catch (err) {
+        const code = err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK';
+        setMessages(prev => prev.map(m =>
+          m.id === setId
+            ? { ...m, phase: 'error', cards: m.cards.map(c => ({ ...c, status: 'error', errorMessage: code })) }
+            : m
+        ));
+      }
+      return;
+    }
 
     setMessages(prev => prev.map(m =>
       m.id === setId
@@ -548,17 +665,23 @@ export default function ChatPanel({
             {prompts.map(prompt => (
               <div key={prompt.id} className={styles.promptRow}>
                 <button
-                  className={`${styles.suggestedBtn} ${prompt.type === 'revision-set' ? styles.suggestedBtnMultiStep : ''}`}
+                  className={`${styles.suggestedBtn} ${prompt.type === 'revision-set' || prompt.type === 'learning-package' ? styles.suggestedBtnMultiStep : ''}`}
                   style={{ color: th.text, borderColor }}
                   onClick={() => {
                     if (prompt.type === 'revision-sheet') return handleCreateRevisionSheet();
                     if (prompt.type === 'revision-set') return handleCreateRevisionSet();
+                    if (prompt.type === 'prepare-interview') return handleCreateInterviewPrep();
+                    if (prompt.type === 'learning-package') return handleCreateLearningPackage();
                     return handleSend(prompt.text);
                   }}
                   disabled={isLoading}
-                  title={prompt.type === 'revision-set' ? 'Génère plusieurs fiches (un appel par concept, ~1 min)' : undefined}
+                  title={
+                    prompt.type === 'revision-set' ? 'Génère plusieurs fiches (un appel par concept, ~1 min)'
+                    : prompt.type === 'learning-package' ? 'Génère deux fichiers pairés : exercices et solutions'
+                    : undefined
+                  }
                 >
-                  {prompt.type === 'revision-set' && <span aria-hidden="true">⚡ </span>}
+                  {prompt.type !== 'chat' && <span aria-hidden="true">⚡ </span>}
                   {prompt.title}
                 </button>
                 <div className={styles.promptActions}>
@@ -639,7 +762,7 @@ export default function ChatPanel({
             );
           }
 
-          if (msg.role === 'revision-sheet') {
+          if (msg.role === 'revision-sheet' || msg.role === 'interview-prep') {
             const saveState = saveStates[msg.id];
             return (
               <div key={msg.id} className={styles.revisionSheet} style={{ borderLeftColor: '#c8a96e', background: th.bg }}>
@@ -653,24 +776,34 @@ export default function ChatPanel({
                     <pre className={styles.revisionContent} style={{ color: th.text }}>
                       {msg.text}
                     </pre>
-                    <button
-                      className={styles.saveSheetBtn}
-                      style={{ color: th.text, borderColor }}
-                      onClick={() => handleSaveSheet(msg)}
-                      disabled={saveState === 'saving' || saveState === 'saved'}
-                    >
-                      {saveState === 'saving' && 'Saving…'}
-                      {saveState === 'saved' && 'Saved to Drive ✓'}
-                      {saveState === 'error' && 'Save failed — retry'}
-                      {!saveState && 'Save to Drive'}
-                    </button>
+                    <div className={styles.cardActions}>
+                      <button
+                        className={styles.downloadFileBtn}
+                        style={{ color: th.text, borderColor }}
+                        onClick={() => downloadTextFile(`${slugify(msg.title)}.md`, msg.text)}
+                        title={`Download ${slugify(msg.title)}.md`}
+                      >
+                        ⬇ Télécharger
+                      </button>
+                      <button
+                        className={styles.saveSheetBtn}
+                        style={{ color: th.text, borderColor }}
+                        onClick={() => handleSaveSheet(msg)}
+                        disabled={saveState === 'saving' || saveState === 'saved'}
+                      >
+                        {saveState === 'saving' && 'Saving…'}
+                        {saveState === 'saved' && 'Saved to Drive ✓'}
+                        {saveState === 'error' && 'Save failed — retry'}
+                        {!saveState && 'Save to Drive'}
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
             );
           }
 
-          if (msg.role === 'revision-set') {
+          if (msg.role === 'revision-set' || msg.role === 'learning-package') {
             const doneCount = msg.cards.filter(c => c.status === 'done').length;
             const errorCount = msg.cards.filter(c => c.status === 'error').length;
             return (

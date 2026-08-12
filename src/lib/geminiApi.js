@@ -96,6 +96,52 @@ Format exact :
   return result.response.text();
 }
 
+/**
+ * Generates an interview-prep document: a mix of conceptual and
+ * technical/practical questions with model answers, grounded in the
+ * current chapter (non-streaming). Returns a markdown string.
+ */
+export async function generateInterviewPrep({
+  apiKey,
+  pageText,
+  bookTitle,
+  bookAuthor,
+  chapterName,
+}) {
+  if (!apiKey) throw new Error('NO_API_KEY');
+
+  const genAI = new GoogleGenerativeAI(apiKey, { apiVersion: 'v1' });
+  const model = genAI.getGenerativeModel({
+    model: MODEL,
+    systemInstruction: `Tu es un recruteur technique qui prépare un candidat à un entretien sur le contenu d'un chapitre. Réponds toujours en français, en Markdown avec des titres ##.
+${ANTI_FABRICATION_RULES}`,
+    generationConfig: { maxOutputTokens: 32768, temperature: 0.5 },
+  });
+
+  const chapterLabel = chapterName || 'Chapitre';
+  const prompt = `Prépare une session d'entretien technique pour le chapitre "${chapterLabel}" du livre "${bookTitle}" de ${bookAuthor}.
+
+${pageText && pageText.length > 30 ? `En te basant sur ce texte du chapitre :\n"""\n${pageText}\n"""\n` : ''}
+Génère entre 6 et 10 questions, en alternant :
+- des questions conceptuelles ("expliquez X", "quelle est la différence entre X et Y", "pourquoi utiliser X plutôt que Y") ;
+- des questions techniques/pratiques (lire ou compléter un court extrait de code, prédire un résultat, identifier un piège).
+
+Format exact, une section par question :
+# ${chapterLabel} — Préparation d'entretien
+
+## Question 1 (conceptuelle | technique)
+(énoncé de la question)
+
+**Réponse :**
+(réponse modèle complète)
+
+## Question 2 (conceptuelle | technique)
+...`;
+
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
 // ── Multi-call revision set (one plan call + one call per concept) ──
 //
 // Replaces cramming N sheets into a single response: a long one-shot
@@ -136,7 +182,8 @@ const ANTI_FABRICATION_RULES = `Règles strictes :
 - N'utilise QUE la syntaxe et les opérateurs effectivement présents dans le texte fourni.
 - Adapte les exemples déjà présents dans le texte plutôt que d'en inventer de nouveaux ; ne fusionne pas deux exemples distincts du texte en un seul exemple composite.
 - Si aucun exemple concret n'existe dans le texte pour ce concept précis, écris "Aucun exemple de code n'est fourni dans le texte pour ce concept" plutôt que d'en improviser un.
-- Reste strictement centré sur le concept demandé, pas sur les autres sections du chapitre.`;
+- Reste strictement centré sur le concept demandé, pas sur les autres sections du chapitre.
+- Le code lui-même (noms de fonctions, de variables, de classes, et commentaires à l'intérieur du code) doit toujours être en anglais, conformément aux conventions Python standard — même si le reste de la fiche est rédigé en français.`;
 
 const PEDAGOGY_RULES = `Cette fiche sera lue après le chapitre et avant les exercices, comme support de consolidation.
 Privilégie : les explications progressives, les exemples concrets, les explications du « pourquoi », les cas d'utilisation, les pièges fréquents, les distinctions avec les concepts proches du chapitre.
@@ -299,4 +346,94 @@ export async function* generateRevisionSet({ apiKey, pageText, bookTitle, bookAu
     }
   }
   yield { type: 'done' };
+}
+
+// ── Learning package (paired exercises + solutions, one call) ──
+
+const LEARNING_PACKAGE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    exercises: { type: SchemaType.STRING, description: 'Document Markdown complet des exercices, en français' },
+    solutions: { type: SchemaType.STRING, description: 'Document Markdown complet des solutions, en français, même numérotation que exercises' },
+  },
+  required: ['exercises', 'solutions'],
+};
+
+// Deliberately distinct from ANTI_FABRICATION_RULES: revision sheets must
+// never invent examples, but exercises exist specifically to be new practice
+// problems — they just need to stay inside what the chapter actually taught.
+const EXERCISE_SCOPE_RULES = `Règles strictes :
+- Les exercices doivent être des scénarios NOUVEAUX (ne recopie pas les exemples du livre tels quels) — c'est le but d'un exercice.
+- N'utilise QUE les fonctions, méthodes, syntaxe et concepts réellement enseignés dans le texte fourni ; n'exige aucune bibliothèque ou notion externe non mentionnée dans le chapitre.
+- Chaque exercice doit être réalisable avec uniquement ce qui a été enseigné jusqu'ici dans ce texte.
+- La numérotation des exercices dans "exercises" et des solutions dans "solutions" doit correspondre exactement (Exercice 1 ↔ Solution 1, etc.).
+- Le code lui-même (noms de fonctions, de variables, de classes, et commentaires à l'intérieur du code) doit toujours être en anglais, conformément aux conventions Python standard — même si les énoncés et explications sont en français.`;
+
+const LEARNING_PACKAGE_SYSTEM_INSTRUCTION = `Tu es un formateur qui conçoit des exercices de code pratiques à partir d'un chapitre.
+Réponds en français pour les énoncés et explications ; le code doit toujours être en anglais (identifiants et commentaires).
+Utilise du Markdown avec des titres ##.
+${EXERCISE_SCOPE_RULES}`;
+
+/**
+ * Generates a paired learning package: a set of code exercises and their
+ * corrected solutions, grounded in the current chapter (single structured
+ * call so the two documents stay numbered consistently).
+ */
+export async function generateLearningPackage({
+  apiKey,
+  pageText,
+  bookTitle,
+  bookAuthor,
+  chapterName,
+  signal,
+}) {
+  if (!apiKey) throw new Error('NO_API_KEY');
+  if (!pageText || pageText.length < 30) throw new Error('NO_PAGE_TEXT');
+
+  const genAI = new GoogleGenerativeAI(apiKey, { apiVersion: 'v1' });
+  const model = genAI.getGenerativeModel({
+    model: MODEL,
+    systemInstruction: LEARNING_PACKAGE_SYSTEM_INSTRUCTION,
+    generationConfig: {
+      temperature: 0.5,
+      maxOutputTokens: 32768,
+      responseMimeType: 'application/json',
+      responseSchema: LEARNING_PACKAGE_SCHEMA,
+    },
+  });
+
+  const chapterLabel = chapterName || 'Chapitre';
+  const prompt = `Livre : "${bookTitle}" de ${bookAuthor}. Chapitre : ${chapterLabel}.
+
+Texte du chapitre :
+"""
+${pageText}
+"""
+
+Conçois entre 4 et 8 exercices de code à écrire par le lecteur, du plus simple au plus avancé, couvrant les concepts réellement enseignés dans ce texte.
+
+Format de "exercises" :
+# ${chapterLabel} — Exercices
+
+## Exercice 1
+(énoncé, éventuellement avec un point de départ de code à compléter)
+
+## Exercice 2
+...
+
+Format de "solutions" :
+# ${chapterLabel} — Solutions
+
+## Solution 1
+\`\`\`python
+(code corrigé complet)
+\`\`\`
+(courte explication si utile)
+
+## Solution 2
+...`;
+
+  const result = await model.generateContent(prompt, { signal });
+  const parsed = JSON.parse(result.response.text());
+  return { exercises: parsed.exercises, solutions: parsed.solutions };
 }
