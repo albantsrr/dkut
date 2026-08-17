@@ -5,6 +5,7 @@ import { getAllBooks, saveBook, deleteBook, syncLibrary } from '../utils/storage
 import { getAllProgress, clearProgress } from '../lib/progress.js';
 import { DriveAuthError } from '../lib/driveApi.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import TranslateBookModal from '../components/TranslateBookModal.jsx';
 import styles from './Library.module.css';
 
 const SPINE_COLORS = [
@@ -65,6 +66,7 @@ export default function Library() {
   const [fetchError, setFetchError] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [translatingBook, setTranslatingBook] = useState(null);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
@@ -114,10 +116,19 @@ export default function Library() {
   const handleDelete = async (e, id) => {
     e.stopPropagation();
     if (confirmDelete === id) {
+      const removedBook = books.find(b => b.id === id);
       setBooks(prev => prev.filter(b => b.id !== id));
       setProgressMap(prev => { const next = { ...prev }; delete next[id]; return next; });
       setConfirmDelete(null);
-      deleteBook(id).catch(() => {});
+      try {
+        await deleteBook(id);
+      } catch (err) {
+        // Deletion actually failed (not just "already gone") — the Drive file
+        // is still there, so restore the card instead of leaving the UI out
+        // of sync with the catalog (which a page reload would reveal anyway).
+        if (removedBook) setBooks(prev => [...prev, removedBook]);
+        alert(`La suppression a échoué : ${err.message}. Réessayez.`);
+      }
     } else {
       setConfirmDelete(id);
       setTimeout(() => setConfirmDelete(null), 3000);
@@ -145,6 +156,15 @@ export default function Library() {
     setProgressMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
     navigate(`/read/${id}`);
   };
+
+  const handleTranslateClick = (e, book) => {
+    e.stopPropagation();
+    setTranslatingBook(book);
+  };
+
+  const handleTranslated = useCallback(() => {
+    getAllBooks().then(setBooks).catch(() => {});
+  }, []);
 
   return (
     <div className={styles.page}>
@@ -320,6 +340,17 @@ export default function Library() {
                     >
                       {confirmDelete === book.id ? '✕ Confirm' : '✕'}
                     </button>
+
+                    {!book.translatedFrom && (
+                      <button
+                        className={styles.translateBtn}
+                        onClick={(e) => handleTranslateClick(e, book)}
+                        title="Traduire ce livre"
+                        aria-label="Translate this book"
+                      >
+                        ⇄
+                      </button>
+                    )}
                   </article>
                 );
               })}
@@ -346,6 +377,15 @@ export default function Library() {
       <footer className={styles.footer}>
         <span className={styles.footerOrnament}>✦</span>
       </footer>
+
+      {translatingBook && (
+        <TranslateBookModal
+          book={translatingBook}
+          allBooks={books}
+          onClose={() => setTranslatingBook(null)}
+          onTranslated={handleTranslated}
+        />
+      )}
     </div>
   );
 }

@@ -437,3 +437,61 @@ Format de "solutions" :
   const parsed = JSON.parse(result.response.text());
   return { exercises: parsed.exercises, solutions: parsed.solutions };
 }
+
+// ── Whole-book translation (structured batch calls, one per chapter) ──
+
+const TRANSLATION_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    translations: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          id: { type: SchemaType.STRING, description: 'Identifiant recopié tel quel depuis le segment source correspondant' },
+          text: { type: SchemaType.STRING, description: 'Texte traduit ; les jetons ⟦N⟧ éventuels doivent être recopiés à l\'identique, à la même position relative' },
+        },
+        required: ['id', 'text'],
+      },
+    },
+  },
+  required: ['translations'],
+};
+
+function buildTranslationSystemInstruction(targetLangLabel) {
+  return `Tu es un traducteur professionnel. Traduis chaque segment fourni vers ${targetLangLabel}.
+Règles strictes :
+- Traduis fidèlement le sens de chaque segment ; n'ajoute, ne supprimes, ne fusionnes et ne résumes jamais de contenu.
+- N'explique jamais ta traduction, ne commente jamais, ne reformule pas au-delà de ce que la traduction exige.
+- Les jetons de la forme ⟦0⟧, ⟦1⟧, ⟦2⟧... marquent du code ou des formules mathématiques masqués : recopie-les EXACTEMENT tels quels (mêmes crochets, même nombre), à la même position relative dans la phrase, sans jamais les traduire ni les modifier.
+- Préserve les noms propres, noms de produits et identifiants techniques non masqués tels quels.
+- Retourne exactement un objet de sortie par segment d'entrée, avec le même "id".
+- Ne retourne jamais un "id" absent de la requête, et n'en invente aucun.`;
+}
+
+/**
+ * Translates a batch of independent text segments in one structured call.
+ * Raw call only — no validation against the request is performed here
+ * (see validateBatch in epubTranslator.js, which never trusts this blindly).
+ */
+export async function translateSegments({ apiKey, segments, targetLangLabel, signal }) {
+  if (!apiKey) throw new Error('NO_API_KEY');
+  if (!segments?.length) return [];
+
+  const genAI = new GoogleGenerativeAI(apiKey, { apiVersion: 'v1' });
+  const model = genAI.getGenerativeModel({
+    model: MODEL,
+    systemInstruction: buildTranslationSystemInstruction(targetLangLabel),
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 8192,
+      responseMimeType: 'application/json',
+      responseSchema: TRANSLATION_SCHEMA,
+    },
+  });
+
+  const prompt = `Segments à traduire (JSON) :\n${JSON.stringify(segments)}`;
+  const result = await model.generateContent(prompt, { signal });
+  const parsed = JSON.parse(result.response.text());
+  return Array.isArray(parsed.translations) ? parsed.translations : [];
+}

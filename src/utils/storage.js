@@ -83,6 +83,41 @@ export async function saveBook({ title, author, cover, data, addedAt }) {
   return driveId;
 }
 
+// Saves a translated copy of a book to Drive. Deliberately distinct from
+// saveBook(): saveBook() skips upload and returns the existing id when a
+// title+author match is found, which would silently point a second
+// translation run at the first run's file — a translated copy must always
+// be a genuinely new artifact.
+export async function saveTranslatedBook({ title, author, data, sourceId, language, addedAt }) {
+  const folderId = await getLibraryFolderId();
+  const normalTitle  = title  || 'Untitled';
+  const normalAuthor = author || 'Unknown author';
+
+  const safeName = normalTitle.replace(/[^\w\s-]/g, '').trim() || 'book';
+  const filename  = `${safeName}-${Date.now()}.epub`;
+
+  const blob      = new Blob([data], { type: 'application/epub+zip' });
+  const driveFile = await uploadFile(folderId, filename, blob, 'application/epub+zip');
+  const driveId   = driveFile.id;
+
+  await cacheEpub(driveId, data);
+  const cover = await extractCover(data.slice(0));
+  if (cover) await cacheCover(driveId, cover);
+
+  const driveData = await loadData();
+  driveData.books.push({
+    id: driveId,
+    title: normalTitle,
+    author: normalAuthor,
+    addedAt: addedAt ?? Date.now(),
+    language,
+    translatedFrom: sourceId,
+  });
+  await saveData(driveData);
+
+  return driveId;
+}
+
 // Returns the full book object including data (ArrayBuffer).
 // Checks IndexedDB cache before downloading from Drive.
 export async function getBook(id) {
@@ -106,15 +141,20 @@ export async function getBook(id) {
 }
 
 // Returns all books without the data (ArrayBuffer) field — only metadata + cached cover.
-// Silently deduplicates by title+author, keeping the entry with the most recent addedAt.
+// Dedupes by Drive file id only — that's a book's one true identity. Two
+// entries sharing title+author (e.g. a translated copy alongside its source,
+// or a book re-imported from elsewhere with unchanged metadata) are
+// legitimately distinct Drive files and must both stay visible; an earlier
+// version of this function deduped by title+author instead and silently
+// dropped (and persisted the removal of) whichever entry lost the tie —
+// exactly the kind of pair a translation produces.
 export async function getAllBooks() {
   const driveData = await loadData();
 
   const seen = new Map();
   for (const book of driveData.books) {
-    const key = `${book.title}\0${book.author}`;
-    const existing = seen.get(key);
-    if (!existing || book.addedAt > existing.addedAt) seen.set(key, book);
+    const existing = seen.get(book.id);
+    if (!existing || book.addedAt > existing.addedAt) seen.set(book.id, book);
   }
   const deduped = Array.from(seen.values());
 
@@ -176,8 +216,16 @@ export async function syncLibrary() {
 }
 
 export async function deleteBook(id) {
-  // Ignore Drive errors — file may already be gone (404) or inaccessible (403)
-  await deleteFile(id).catch(() => {});
+  try {
+    await deleteFile(id);
+  } catch (err) {
+    // Truly gone (404) or inaccessible (403) — still fine to drop it from our
+    // own catalog below. Any other failure (expired token, network blip,
+    // transient 5xx) must NOT be swallowed: silently proceeding would remove
+    // the catalog entry while the file is still sitting in Drive, and the
+    // next "Sync Drive" would resurrect it as if it were a brand-new book.
+    if (!/\b40[34]\b/.test(err.message || '')) throw err;
+  }
   await evictBook(id);
 
   const driveData = await loadData();
