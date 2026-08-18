@@ -296,7 +296,10 @@
 }
 
 .tocItem {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
   width: 100%;
   background: none;
   border: none;
@@ -314,6 +317,154 @@
   background: rgba(200, 169, 110, 0.08);
   opacity: 1 !important;
 }
+
+.tocItemBadge {
+  flex-shrink: 0;
+  color: #c8a96e;
+  font-size: 0.72rem;
+  opacity: 0.8;
+  margin-top: 0.15em;
+}
+
+.quizProgressSummary {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.45;
+  padding: 0.6rem 1.25rem 0;
+}
+
+/* ── Quiz picker popover ── */
+.quizPicker {
+  position: absolute;
+  top: 60px;
+  right: 1.25rem;
+  z-index: 70;
+  min-width: 240px;
+  border: 1px solid;
+  border-radius: 6px;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.quizPickerChapter {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  padding: 0.2rem 0.35rem 0.3rem;
+}
+
+.quizPickerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  padding: 0.5rem 0.6rem;
+  transition: background 0.15s ease;
+}
+
+.quizPickerRow:hover {
+  background: rgba(200, 169, 110, 0.08);
+}
+
+.quizPickerScore {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  color: #c8a96e;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+/* ── End-of-chapter quiz nudge ── */
+/* Deliberately theme-independent (unlike th.bg/th.text elsewhere in this
+   file): the reading theme's bg can be near-white (day/sepia), which made
+   this element nearly invisible against it. Uses the app's fixed dark/gold
+   chrome palette instead, same principle as QuizModal. */
+.chapterNudge {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-gold);
+  border-radius: 6px;
+  padding: 0.55rem 0.6rem 0.55rem 0.9rem;
+  max-width: min(90vw, 30rem);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  animation: nudgeIn 0.25s ease;
+}
+
+@keyframes nudgeIn {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.chapterNudgeText {
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--gold-light);
+}
+
+.chapterNudgeActions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.chapterNudgeBtn {
+  background: none;
+  color: var(--text-primary);
+  border: 1px solid var(--border-gold);
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.6rem;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.chapterNudgeBtn:hover {
+  opacity: 1;
+  background: rgba(200, 169, 110, 0.14);
+}
+
+.chapterNudgeClose {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  opacity: 0.5;
+  padding: 0.2rem;
+}
+
+.chapterNudgeClose:hover { opacity: 0.9; }
 
 /* ── Settings Panel ── */
 .settings {
@@ -406,81 +557,6 @@
   letter-spacing: 0.1em;
   flex: 1;
   text-align: center;
-}
-
-/* Translation */
-.langSelect {
-  width: 100%;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid;
-  border-radius: 3px;
-  font-family: var(--font-display);
-  font-size: 0.85rem;
-  font-style: italic;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.2s ease;
-  appearance: auto;
-}
-
-.langSelect:focus {
-  border-color: rgba(200, 169, 110, 0.5) !important;
-}
-
-.translatingDot {
-  display: inline-block;
-  margin-left: 0.4rem;
-  font-size: 0.45rem;
-  color: #c8a96e;
-  vertical-align: middle;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.translatingBar {
-  position: absolute;
-  top: 2px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #c8a96e, transparent);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s linear infinite;
-  z-index: 101;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.2; }
-}
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-/* Translation progress bar */
-.translationProgressWrap {
-  position: relative;
-  margin-top: 0.6rem;
-  height: 3px;
-  background: rgba(200, 169, 110, 0.2);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.translationProgressFill {
-  height: 100%;
-  background: #c8a96e;
-  border-radius: 2px;
-  transition: width 0.15s ease;
-}
-
-.translationProgressCount {
-  display: block;
-  margin-top: 0.35rem;
-  font-size: 0.65rem;
-  opacity: 0.5;
-  letter-spacing: 0.03em;
 }
 
 /* Progress display */

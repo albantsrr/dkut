@@ -96,52 +96,6 @@ Format exact :
   return result.response.text();
 }
 
-/**
- * Generates an interview-prep document: a mix of conceptual and
- * technical/practical questions with model answers, grounded in the
- * current chapter (non-streaming). Returns a markdown string.
- */
-export async function generateInterviewPrep({
-  apiKey,
-  pageText,
-  bookTitle,
-  bookAuthor,
-  chapterName,
-}) {
-  if (!apiKey) throw new Error('NO_API_KEY');
-
-  const genAI = new GoogleGenerativeAI(apiKey, { apiVersion: 'v1' });
-  const model = genAI.getGenerativeModel({
-    model: MODEL,
-    systemInstruction: `Tu es un recruteur technique qui prépare un candidat à un entretien sur le contenu d'un chapitre. Réponds toujours en français, en Markdown avec des titres ##.
-${ANTI_FABRICATION_RULES}`,
-    generationConfig: { maxOutputTokens: 32768, temperature: 0.5 },
-  });
-
-  const chapterLabel = chapterName || 'Chapitre';
-  const prompt = `Prépare une session d'entretien technique pour le chapitre "${chapterLabel}" du livre "${bookTitle}" de ${bookAuthor}.
-
-${pageText && pageText.length > 30 ? `En te basant sur ce texte du chapitre :\n"""\n${pageText}\n"""\n` : ''}
-Génère entre 6 et 10 questions, en alternant :
-- des questions conceptuelles ("expliquez X", "quelle est la différence entre X et Y", "pourquoi utiliser X plutôt que Y") ;
-- des questions techniques/pratiques (lire ou compléter un court extrait de code, prédire un résultat, identifier un piège).
-
-Format exact, une section par question :
-# ${chapterLabel} — Préparation d'entretien
-
-## Question 1 (conceptuelle | technique)
-(énoncé de la question)
-
-**Réponse :**
-(réponse modèle complète)
-
-## Question 2 (conceptuelle | technique)
-...`;
-
-  const result = await model.generateContent(prompt);
-  return result.response.text();
-}
-
 // ── Multi-call revision set (one plan call + one call per concept) ──
 //
 // Replaces cramming N sheets into a single response: a long one-shot
@@ -348,61 +302,93 @@ export async function* generateRevisionSet({ apiKey, pageText, bookTitle, bookAu
   yield { type: 'done' };
 }
 
-// ── Learning package (paired exercises + solutions, one call) ──
+// ── Quiz (QCM) generation — exercises and interview prep, one call each ──
 
-const LEARNING_PACKAGE_SCHEMA = {
+const QUIZ_SCHEMA = {
   type: SchemaType.OBJECT,
   properties: {
-    exercises: { type: SchemaType.STRING, description: 'Document Markdown complet des exercices, en français' },
-    solutions: { type: SchemaType.STRING, description: 'Document Markdown complet des solutions, en français, même numérotation que exercises' },
+    questions: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          question: { type: SchemaType.STRING, description: 'Énoncé en français, Markdown autorisé (bloc de code fencé si pertinent)' },
+          options: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: 'Exactement 4 choix de réponse, un seul strictement correct',
+          },
+          correctIndex: { type: SchemaType.NUMBER, description: 'Index (0 à 3) de la réponse correcte dans options' },
+          explanation: { type: SchemaType.STRING, description: 'Courte explication de la bonne réponse, en français' },
+        },
+        required: ['question', 'options', 'correctIndex', 'explanation'],
+      },
+    },
   },
-  required: ['exercises', 'solutions'],
+  required: ['questions'],
 };
 
 // Deliberately distinct from ANTI_FABRICATION_RULES: revision sheets must
-// never invent examples, but exercises exist specifically to be new practice
-// problems — they just need to stay inside what the chapter actually taught.
-const EXERCISE_SCOPE_RULES = `Règles strictes :
-- Les exercices doivent être des scénarios NOUVEAUX (ne recopie pas les exemples du livre tels quels) — c'est le but d'un exercice.
-- N'utilise QUE les fonctions, méthodes, syntaxe et concepts réellement enseignés dans le texte fourni ; n'exige aucune bibliothèque ou notion externe non mentionnée dans le chapitre.
-- Chaque exercice doit être réalisable avec uniquement ce qui a été enseigné jusqu'ici dans ce texte.
-- La numérotation des exercices dans "exercises" et des solutions dans "solutions" doit correspondre exactement (Exercice 1 ↔ Solution 1, etc.).
-- Le code lui-même (noms de fonctions, de variables, de classes, et commentaires à l'intérieur du code) doit toujours être en anglais, conformément aux conventions Python standard — même si les énoncés et explications sont en français.`;
+// never invent examples, but exercises exist specifically to test new
+// practice scenarios — they just need to stay inside what the chapter
+// actually taught, and favor reasoning over plain definition recall.
+const EXERCISE_QUIZ_RULES = `Règles strictes :
+- N'utilise QUE les fonctions, méthodes, syntaxe et concepts réellement enseignés dans le texte fourni.
+- Varie les types de questions plutôt que d'empiler des questions de définition ; mélange par exemple :
+  - prédire le résultat d'un court extrait de code ("Que va afficher ce code ?") ;
+  - repérer lequel de plusieurs extraits similaires contient un bug ;
+  - compléter une ligne manquante d'un extrait, à choix parmi 4 propositions.
+- Le code affiché dans "question" ou "options" est toujours en LECTURE SEULE — l'utilisateur ne fait que choisir une réponse, il n'écrit jamais de code. Utilise des blocs Markdown fencés (\`\`\`) pour tout extrait de code.
+- Si une question fait référence à "ce code" ou à un extrait ("Que va afficher ce code ?", "lequel de ces extraits contient un bug ?"), l'extrait de code correspondant DOIT être recopié intégralement et littéralement dans le champ "question" (ou réparti dans "options" pour un choix entre extraits) — ne JAMAIS décrire un code sans le montrer, ne jamais supposer que le lecteur connaît déjà l'extrait auquel tu fais allusion.
+- Chaque question doit être ENTIÈREMENT AUTONOME : si le code de la question utilise une classe, fonction ou variable définie plus tôt dans le chapitre (ex. une classe "Vector" présentée dans un exemple précédent), la définition complète de cette classe/fonction DOIT être recopiée dans le champ "question", juste avant le code de la question elle-même — dans le même bloc ou dans un second bloc de code séparé. N'utilise JAMAIS une formulation du type "en utilisant la classe X de l'exemple N" sans reproduire intégralement ce que cette classe/cet exemple contient : le lecteur n'a que le texte de la question sous les yeux, pas le reste du chapitre.
+- Les 4 options doivent être plausibles (pas de distracteur absurde), une seule strictement correcte.
+- Le code lui-même (identifiants, commentaires) doit toujours être en anglais, conformément aux conventions Python standard, même si l'énoncé est en français.`;
 
-const LEARNING_PACKAGE_SYSTEM_INSTRUCTION = `Tu es un formateur qui conçoit des exercices de code pratiques à partir d'un chapitre.
-Réponds en français pour les énoncés et explications ; le code doit toujours être en anglais (identifiants et commentaires).
-Utilise du Markdown avec des titres ##.
-${EXERCISE_SCOPE_RULES}`;
+const INTERVIEW_QUIZ_RULES = `Alterne entre questions conceptuelles ("quelle est la différence entre X et Y", "pourquoi utiliser X plutôt que Y") et questions techniques (lire un court extrait de code en lecture seule, prédire un résultat, identifier un piège) — comme dans un vrai entretien technique.
+Chaque question doit être ENTIÈREMENT AUTONOME : si un extrait de code utilise une classe, fonction ou variable définie plus tôt dans le chapitre, sa définition complète doit être recopiée dans le champ "question" avant le code de la question — ne jamais renvoyer implicitement vers "l'exemple N" ou "la classe X du chapitre" sans le reproduire, le lecteur n'a que le texte de la question sous les yeux.
+${ANTI_FABRICATION_RULES}`;
+
+function buildQuizSystemInstruction(mode) {
+  const base = 'Tu es un formateur qui conçoit un QCM (questionnaire à choix multiples) à partir d\'un chapitre. Réponds en français. Chaque question a exactement 4 options, une seule strictement correcte.';
+  return mode === 'interview' ? `${base}\n${INTERVIEW_QUIZ_RULES}` : `${base}\n${EXERCISE_QUIZ_RULES}`;
+}
+
+// Never trust the structured output blindly: drop any question missing a
+// field, without exactly 4 options, or with an out-of-range correctIndex,
+// rather than letting a malformed entry crash the quiz player.
+function validateQuizQuestions(questions) {
+  return (Array.isArray(questions) ? questions : []).filter(q =>
+    q && typeof q.question === 'string' &&
+    Array.isArray(q.options) && q.options.length === 4 &&
+    Number.isInteger(q.correctIndex) && q.correctIndex >= 0 && q.correctIndex < 4 &&
+    typeof q.explanation === 'string'
+  );
+}
 
 /**
- * Generates a paired learning package: a set of code exercises and their
- * corrected solutions, grounded in the current chapter (single structured
- * call so the two documents stay numbered consistently).
+ * Generates a multiple-choice quiz (mode: 'exercise' | 'interview') for the
+ * current chapter, as a single structured call. Returns a validated array
+ * of questions (never throws on individual malformed questions — only on
+ * missing input or a wholly empty result).
  */
-export async function generateLearningPackage({
-  apiKey,
-  pageText,
-  bookTitle,
-  bookAuthor,
-  chapterName,
-  signal,
-}) {
+export async function generateQuiz({ apiKey, mode, pageText, bookTitle, bookAuthor, chapterName, signal }) {
   if (!apiKey) throw new Error('NO_API_KEY');
   if (!pageText || pageText.length < 30) throw new Error('NO_PAGE_TEXT');
 
   const genAI = new GoogleGenerativeAI(apiKey, { apiVersion: 'v1' });
   const model = genAI.getGenerativeModel({
     model: MODEL,
-    systemInstruction: LEARNING_PACKAGE_SYSTEM_INSTRUCTION,
+    systemInstruction: buildQuizSystemInstruction(mode),
     generationConfig: {
       temperature: 0.5,
       maxOutputTokens: 32768,
       responseMimeType: 'application/json',
-      responseSchema: LEARNING_PACKAGE_SCHEMA,
+      responseSchema: QUIZ_SCHEMA,
     },
   });
 
   const chapterLabel = chapterName || 'Chapitre';
+  const kind = mode === 'interview' ? "de préparation à un entretien technique" : "d'exercices pratiques";
   const prompt = `Livre : "${bookTitle}" de ${bookAuthor}. Chapitre : ${chapterLabel}.
 
 Texte du chapitre :
@@ -410,32 +396,13 @@ Texte du chapitre :
 ${pageText}
 """
 
-Conçois entre 4 et 8 exercices de code à écrire par le lecteur, du plus simple au plus avancé, couvrant les concepts réellement enseignés dans ce texte.
-
-Format de "exercises" :
-# ${chapterLabel} — Exercices
-
-## Exercice 1
-(énoncé, éventuellement avec un point de départ de code à compléter)
-
-## Exercice 2
-...
-
-Format de "solutions" :
-# ${chapterLabel} — Solutions
-
-## Solution 1
-\`\`\`python
-(code corrigé complet)
-\`\`\`
-(courte explication si utile)
-
-## Solution 2
-...`;
+Conçois un QCM ${kind} de 8 à 10 questions, couvrant les concepts réellement enseignés dans ce texte, du plus simple au plus avancé.`;
 
   const result = await model.generateContent(prompt, { signal });
   const parsed = JSON.parse(result.response.text());
-  return { exercises: parsed.exercises, solutions: parsed.solutions };
+  const questions = validateQuizQuestions(parsed.questions);
+  if (questions.length === 0) throw new Error('EMPTY_QUIZ');
+  return questions;
 }
 
 // ── Whole-book translation (structured batch calls, one per chapter) ──

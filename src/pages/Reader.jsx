@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Epub from 'epubjs';
 import { getBook } from '../utils/storage.js';
 import { getProgress, saveProgress, clearProgress, flushProgress } from '../lib/progress.js';
+import { getAllQuizProgress } from '../lib/quizProgress.js';
 import styles from './Reader.module.css';
 import ChatPanel from '../components/ChatPanel.jsx';
-import { LANGUAGES } from '../lib/languages.js';
+import QuizModal from '../components/QuizModal.jsx';
 
 const THEMES = {
   night: {
@@ -36,21 +37,6 @@ const THEMES = {
 // an undifferentiated wall of paragraphs.
 const HEADING_PREFIX = { H1: '# ', H2: '## ', H3: '### ', H4: '#### ', H5: '##### ', H6: '###### ' };
 
-// Module-level cache persists across book navigation
-const _translationCache = new Map();
-
-async function fetchTranslation(text, lang) {
-  const key = `${lang}\0${text}`;
-  if (_translationCache.has(key)) return _translationCache.get(key);
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(lang)}&dt=t&q=${encodeURIComponent(text)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  const result = data[0].map(c => c[0]).join('');
-  _translationCache.set(key, result);
-  return result;
-}
-
 function flattenToc(toc, depth = 0) {
   const out = [];
   for (const item of toc) {
@@ -75,23 +61,28 @@ export default function Reader() {
   const [toc, setToc] = useState([]);
   const [progress, setProgress] = useState(0);
   const [currentChapter, setCurrentChapter] = useState('');
+  const [currentChapterHref, setCurrentChapterHref] = useState('');
+  const [showQuizPicker, setShowQuizPicker] = useState(false);
+  const [activeQuizMode, setActiveQuizMode] = useState(null); // null | 'exercise' | 'interview'
+  const [quizTarget, setQuizTarget] = useState(null); // { href, label, pageText } for the active quiz
+  const [quizProgressMap, setQuizProgressMap] = useState({}); // { [chapterHref]: { exercise, interview } }
+  const [chapterNudge, setChapterNudge] = useState(null); // { href, label, pageText } | null
   const [theme, setTheme] = useState('night');
   const [fontSize, setFontSize] = useState(18);
   const [showToc, setShowToc] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showChrome, setShowChrome] = useState(true);
-  const [targetLang, setTargetLang] = useState('');
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [translationProgress, setTranslationProgress] = useState(null); // { done, total } | null
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [pageChangeSignal, setPageChangeSignal] = useState(0);
   const [locDebug, setLocDebug] = useState('');
   const hideTimer = useRef(null);
-  const targetLangRef = useRef('');
   const pageTextRef = useRef('');
   const locationsReadyRef = useRef(false);
   const preFullscreenCfiRef = useRef(null);
+  const prevChapterRef = useRef(null); // { href, label } of the chapter before the current one
+  const nudgedChaptersRef = useRef(new Set());
+  const nudgeTimerRef = useRef(null);
 
   const applyTheme = useCallback((rendition, t, size) => {
     const th = THEMES[t];
@@ -146,49 +137,24 @@ export default function Reader() {
 
   const getPageText = useCallback(() => pageTextRef.current, []);
 
-  const translatePage = useCallback(async (lang) => {
-    const iframe = viewerRef.current?.querySelector('iframe');
-    const doc = iframe?.contentDocument;
-    if (!doc?.body) return;
-    setIsTranslating(true);
-    try {
-      const els = Array.from(
-        doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th')
-      ).filter(el => el.textContent.trim().length >= 3);
+  const refreshQuizProgress = useCallback(() => {
+    getAllQuizProgress(id).then(setQuizProgressMap).catch(() => {});
+  }, [id]);
 
-      // Stocker le texte original sur chaque élément (persisté entre les langues)
-      els.forEach(el => {
-        if (!el.dataset.originalText) el.dataset.originalText = el.textContent;
-      });
+  // Reset per-book chapter-transition tracking and (re)load quiz progress
+  // whenever the book id changes.
+  useEffect(() => {
+    prevChapterRef.current = null;
+    nudgedChaptersRef.current = new Set();
+    setChapterNudge(null);
+    refreshQuizProgress();
+  }, [id, refreshQuizProgress]);
 
-      let done = 0;
-      setTranslationProgress({ done: 0, total: els.length });
-
-      await Promise.all(
-        els.map(async (el) => {
-          const text = el.dataset.originalText; // toujours depuis l'original
-          try {
-            el.textContent = await fetchTranslation(text, lang);
-          } catch {
-            // Keep original text on network/API error
-          }
-          done++;
-          setTranslationProgress(prev => prev ? { ...prev, done } : null);
-        })
-      );
-    } finally {
-      setIsTranslating(false);
-      setTranslationProgress(null);
-    }
-  }, []);
-
-  const restorePage = useCallback(() => {
-    const iframe = viewerRef.current?.querySelector('iframe');
-    const doc = iframe?.contentDocument;
-    if (!doc?.body) return;
-    doc.querySelectorAll('[data-original-text]').forEach(el => {
-      el.textContent = el.dataset.originalText;
-    });
+  const openQuiz = useCallback((mode, target) => {
+    setQuizTarget(target);
+    setActiveQuizMode(mode);
+    setShowQuizPicker(false);
+    setChapterNudge(null);
   }, []);
 
   useEffect(() => {
@@ -226,10 +192,6 @@ export default function Reader() {
       // Called on the initial rendition and again if we have to rebuild it
       // after a CFI queue crash.
       const attachHandlers = (r) => {
-        r.on('rendered', () => {
-          if (cancelled || !targetLangRef.current) return;
-          translatePage(targetLangRef.current);
-        });
         locationsReadyRef.current = false;
         r.on('relocated', (loc) => {
           if (cancelled || !locationsReadyRef.current) return;
@@ -247,10 +209,37 @@ export default function Reader() {
           }
           setProgress(pct);
           saveProgress(id, cfi, pct);
+          // loc.start.href is the reliable section href epubjs already
+          // resolved for this location — CFIs are spine-index/manifest-id
+          // based and never contain the filename, so matching against them
+          // (as done previously) only worked by coincidence.
+          const newHref = loc.start.href || '';
           const match = flattenToc(nav.toc).find(
-            (item) => item.href && cfi.includes(item.href.split('#')[0])
+            (item) => item.href && item.href.split('#')[0] === newHref
           );
-          setCurrentChapter(match?.label?.trim() || '');
+          const newLabel = match?.label?.trim() || '';
+
+          // Chapter transition detected: pageTextRef still holds the text of
+          // the chapter we're leaving (the RAF below hasn't overwritten it
+          // yet) — snapshot it now so the end-of-chapter nudge can quiz on
+          // the right content even after the iframe has moved on.
+          if (newHref && prevChapterRef.current?.href && prevChapterRef.current.href !== newHref) {
+            const leftHref = prevChapterRef.current.href;
+            if (!nudgedChaptersRef.current.has(leftHref)) {
+              nudgedChaptersRef.current.add(leftHref);
+              setChapterNudge({
+                href: leftHref,
+                label: prevChapterRef.current.label,
+                pageText: pageTextRef.current,
+              });
+              clearTimeout(nudgeTimerRef.current);
+              nudgeTimerRef.current = setTimeout(() => setChapterNudge(null), 9000);
+            }
+          }
+          if (newHref) prevChapterRef.current = { href: newHref, label: newLabel };
+
+          setCurrentChapter(newLabel);
+          setCurrentChapterHref(newHref);
           requestAnimationFrame(() => { if (!cancelled) pageTextRef.current = capturePageText(); });
           setPageChangeSignal(n => n + 1);
         });
@@ -347,7 +336,7 @@ export default function Reader() {
         bookRef.current = null;
       }
     };
-  }, [id, applyTheme, translatePage]);
+  }, [id, applyTheme]);
 
   const toggleFullscreen = useCallback(() => {
     // Save position before the viewport changes so we can restore it after
@@ -392,6 +381,7 @@ export default function Reader() {
         setShowToc(false);
         setShowSettings(false);
         setShowChat(false);
+        setShowQuizPicker(false);
       }
       if (e.key === 'f' || e.key === 'F') toggleFullscreen();
     };
@@ -417,9 +407,9 @@ export default function Reader() {
     setShowChrome(true);
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
-      if (!showToc && !showSettings && !showChat) setShowChrome(false);
+      if (!showToc && !showSettings && !showChat && !showQuizPicker) setShowChrome(false);
     }, 3500);
-  }, [showToc, showSettings, showChat]);
+  }, [showToc, showSettings, showChat, showQuizPicker]);
 
   useEffect(() => {
     resetHideTimer();
@@ -442,16 +432,6 @@ export default function Reader() {
     setShowToc(false);
   };
 
-  const handleLangChange = useCallback((lang) => {
-    targetLangRef.current = lang;
-    setTargetLang(lang);
-    if (lang === '') {
-      restorePage();
-    } else {
-      translatePage(lang);
-    }
-  }, [translatePage, restorePage]);
-
   if (notFound) {
     return (
       <div className={styles.error}>
@@ -464,6 +444,11 @@ export default function Reader() {
   }
 
   const th = THEMES[theme];
+  const hasQuizProgress = (href) => {
+    const entry = quizProgressMap[href];
+    return !!(entry && (entry.exercise?.completed || entry.interview?.completed));
+  };
+  const completedChapterCount = toc.filter(item => hasQuizProgress(item.href)).length;
 
   return (
     <div
@@ -475,6 +460,7 @@ export default function Reader() {
         setShowToc(false);
         setShowSettings(false);
         setShowChat(false);
+        setShowQuizPicker(false);
       }}
     >
       {/* Progress bar */}
@@ -484,11 +470,6 @@ export default function Reader() {
           style={{ width: `${progress}%` }}
         />
       </div>
-
-      {/* Translation activity indicator */}
-      {isTranslating && (
-        <div className={styles.translatingBar} />
-      )}
 
       {/* Top chrome */}
       <header
@@ -516,6 +497,17 @@ export default function Reader() {
             </svg>
           </button>
           <button
+            className={`${styles.iconBtn} ${showQuizPicker ? styles.active : ''}`}
+            onClick={(e) => { e.stopPropagation(); setShowQuizPicker(v => !v); setShowSettings(false); setShowToc(false); }}
+            title="Quiz"
+            style={{ color: th.text }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M5 8.3l2 2 4-4.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
             className={`${styles.iconBtn} ${isFullscreen ? styles.active : ''}`}
             onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
             title={isFullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
@@ -533,7 +525,7 @@ export default function Reader() {
           </button>
           <button
             className={`${styles.iconBtn} ${showSettings ? styles.active : ''}`}
-            onClick={(e) => { e.stopPropagation(); setShowSettings(v => !v); setShowToc(false); }}
+            onClick={(e) => { e.stopPropagation(); setShowSettings(v => !v); setShowToc(false); setShowQuizPicker(false); }}
             title="Settings"
             style={{ color: th.text }}
           >
@@ -544,7 +536,7 @@ export default function Reader() {
           </button>
           <button
             className={`${styles.iconBtn} ${showToc ? styles.active : ''}`}
-            onClick={(e) => { e.stopPropagation(); setShowToc(v => !v); setShowSettings(false); }}
+            onClick={(e) => { e.stopPropagation(); setShowToc(v => !v); setShowSettings(false); setShowQuizPicker(false); }}
             title="Table of contents"
             style={{ color: th.text }}
           >
@@ -556,6 +548,56 @@ export default function Reader() {
           </button>
         </div>
       </header>
+
+      {/* Quiz picker popover */}
+      {showQuizPicker && (
+        <div
+          className={styles.quizPicker}
+          style={{ background: th.bg + 'f5', borderColor: `${th.text}25` }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className={styles.quizPickerChapter} style={{ color: th.text }}>
+            {currentChapter || 'Chapitre'}
+          </p>
+          {['exercise', 'interview'].map((m) => {
+            const entry = quizProgressMap[currentChapterHref]?.[m];
+            return (
+              <button
+                key={m}
+                className={styles.quizPickerRow}
+                style={{ color: th.text }}
+                onClick={() => openQuiz(m, { href: currentChapterHref, label: currentChapter, pageText: pageTextRef.current })}
+              >
+                <span>{m === 'exercise' ? 'Exercices' : 'Entretien'}</span>
+                {entry?.attempts > 0 && (
+                  <span className={styles.quizPickerScore}>{entry.bestScore}/{entry.total}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* End-of-chapter quiz nudge — deliberately not theme-colored (th.*),
+          see .chapterNudge comment in Reader.module.css */}
+      {chapterNudge && (
+        <div className={styles.chapterNudge} onClick={(e) => e.stopPropagation()}>
+          <span className={styles.chapterNudgeText}>
+            Chapitre terminé — tester tes connaissances sur « {chapterNudge.label || 'ce chapitre'} » ?
+          </span>
+          <div className={styles.chapterNudgeActions}>
+            <button className={styles.chapterNudgeBtn} onClick={() => openQuiz('exercise', chapterNudge)}>
+              Exercices
+            </button>
+            <button className={styles.chapterNudgeBtn} onClick={() => openQuiz('interview', chapterNudge)}>
+              Entretien
+            </button>
+            <button className={styles.chapterNudgeClose} onClick={() => setChapterNudge(null)}>
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Viewer */}
       <div ref={viewerWrapperRef} className={styles.viewerWrapper} style={showChat ? { paddingBottom: '50vh' } : undefined}>
@@ -639,6 +681,11 @@ export default function Reader() {
             ✕
           </button>
         </div>
+        {toc.length > 0 && (
+          <p className={styles.quizProgressSummary} style={{ color: th.text }}>
+            Progression quiz : {completedChapterCount}/{toc.length} chapitres
+          </p>
+        )}
         <nav className={styles.tocList}>
           {toc.map((item, i) => (
             <button
@@ -651,7 +698,10 @@ export default function Reader() {
               }}
               onClick={() => goToChapter(item.href)}
             >
-              {item.label}
+              <span>{item.label}</span>
+              {hasQuizProgress(item.href) && (
+                <span className={styles.tocItemBadge} title="Quiz complété">✓</span>
+              )}
             </button>
           ))}
         </nav>
@@ -720,36 +770,6 @@ export default function Reader() {
             </div>
           </div>
 
-          {/* Translation */}
-          <div className={styles.settingsGroup}>
-            <p className={styles.settingsLabel} style={{ color: th.text + '60' }}>
-              Translation
-              {isTranslating && <span className={styles.translatingDot} aria-hidden="true">●</span>}
-            </p>
-            <select
-              className={styles.langSelect}
-              value={targetLang}
-              onChange={(e) => handleLangChange(e.target.value)}
-              style={{ color: th.text, background: th.bg, borderColor: `${th.text}25` }}
-            >
-              <option value="">Off</option>
-              {LANGUAGES.map(({ code, label }) => (
-                <option key={code} value={code}>{label}</option>
-              ))}
-            </select>
-            {isTranslating && translationProgress && (
-              <div className={styles.translationProgressWrap}>
-                <div
-                  className={styles.translationProgressFill}
-                  style={{ width: `${Math.round((translationProgress.done / translationProgress.total) * 100)}%` }}
-                />
-                <span className={styles.translationProgressCount} style={{ color: th.text }}>
-                  {translationProgress.done} / {translationProgress.total}
-                </span>
-              </div>
-            )}
-          </div>
-
           {/* Progress */}
           <div className={styles.settingsGroup}>
             <p className={styles.settingsLabel} style={{ color: th.text + '60' }}>Progress</p>
@@ -786,6 +806,24 @@ export default function Reader() {
         getPageText={getPageText}
         pageChangeSignal={pageChangeSignal}
       />
+
+      {/* Quiz overlay */}
+      {activeQuizMode && quizTarget && (
+        <QuizModal
+          mode={activeQuizMode}
+          bookId={id}
+          chapterHref={quizTarget.href}
+          chapterName={quizTarget.label}
+          bookTitle={metadata?.title || ''}
+          bookAuthor={metadata?.creator || ''}
+          pageText={quizTarget.pageText}
+          onClose={() => {
+            setActiveQuizMode(null);
+            setQuizTarget(null);
+            refreshQuizProgress();
+          }}
+        />
+      )}
 
       {/* Loading overlay */}
       {!ready && (

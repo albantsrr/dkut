@@ -3,8 +3,7 @@ import { translateSegments } from './geminiApi.js';
 import { languageLabel } from './languages.js';
 
 // Translatable block-level elements. Deliberately excludes `pre` — code
-// blocks are never selected as translation units themselves (mirrors
-// Reader.jsx#translatePage, which also skips `pre`).
+// blocks are never selected as translation units themselves.
 const BLOCK_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, dd, dt, figcaption';
 // Elements masked out (as ⟦N⟧ tokens) before a block's text is sent to
 // Gemini, then spliced back verbatim afterwards — this is what keeps code

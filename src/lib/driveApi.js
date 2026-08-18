@@ -47,30 +47,49 @@ async function driveRequest(path, options = {}, _attempt = 0) {
   return res;
 }
 
-// Resumable upload — works for any file size
+// Resumable upload — works for any file size.
+// Both requests carry an explicit timeout: plain fetch() never times out on
+// its own, so a stalled connection (large translated EPUB over a flaky
+// network) would otherwise hang forever with no error and no user feedback.
+const UPLOAD_TIMEOUT_MS = 180_000;
+
 export async function uploadFile(parentId, filename, blob, mimeType) {
   const token = getAccessToken();
   if (!token) throw new Error('Not authenticated');
 
   const metadata = { name: filename, parents: [parentId] };
-  const initRes = await fetch(`${UPLOAD_API}/files?uploadType=resumable`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'X-Upload-Content-Type': mimeType,
-      'X-Upload-Content-Length': String(blob.size),
-    },
-    body: JSON.stringify(metadata),
-  });
+  let initRes;
+  try {
+    initRes = await fetch(`${UPLOAD_API}/files?uploadType=resumable`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-Upload-Content-Type': mimeType,
+        'X-Upload-Content-Length': String(blob.size),
+      },
+      body: JSON.stringify(metadata),
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err.name === 'TimeoutError') throw new Error('Drive initiate upload timed out');
+    throw err;
+  }
   if (!initRes.ok) throw new Error(`Drive initiate upload ${initRes.status}`);
   const uploadUrl = initRes.headers.get('Location');
 
-  const uploadRes = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': mimeType },
-    body: blob,
-  });
+  let uploadRes;
+  try {
+    uploadRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': mimeType },
+      body: blob,
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err.name === 'TimeoutError') throw new Error('Drive upload PUT timed out');
+    throw err;
+  }
   if (!uploadRes.ok) throw new Error(`Drive upload PUT ${uploadRes.status}`);
   return uploadRes.json();
 }

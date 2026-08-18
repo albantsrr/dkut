@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { streamChatMessage, generateRevisionSheet, generateRevisionSet, generateSheetForConcept, generateInterviewPrep, generateLearningPackage } from '../lib/geminiApi.js';
+import rehypeHighlight from 'rehype-highlight';
+import { streamChatMessage, generateRevisionSheet, generateRevisionSet, generateSheetForConcept } from '../lib/geminiApi.js';
 import { saveNotesheet } from '../lib/driveStorage.js';
 import { getAllPrompts, savePrompt, deletePrompt } from '../lib/customPrompts.js';
 import styles from './ChatPanel.module.css';
@@ -14,8 +15,14 @@ const markdownComponents = {
   h2: ({ node, ...props }) => <h2 className={styles.mdHeading} {...props} />,
   h3: ({ node, ...props }) => <h3 className={styles.mdHeading} {...props} />,
   strong: ({ node, ...props }) => <strong className={styles.mdStrong} {...props} />,
-  code: ({ node, inline, ...props }) =>
-    inline ? <code className={styles.mdInlineCode} {...props} /> : <code className={styles.mdCodeBlock} {...props} />,
+  // react-markdown v8+ no longer passes an `inline` prop to `code` — block
+  // vs inline is instead distinguished purely in CSS via the `.mdPre .mdCode`
+  // descendant selector below. `className` must come after `styles.mdCode`
+  // (not before) so rehype's `language-xxx` class (set on fenced code with a
+  // language tag) doesn't silently overwrite ours.
+  code: ({ node, className, ...props }) => (
+    <code className={[styles.mdCode, className].filter(Boolean).join(' ')} {...props} />
+  ),
   pre: ({ node, ...props }) => <pre className={styles.mdPre} {...props} />,
 };
 
@@ -141,7 +148,7 @@ const CARD_STATUS_CLASS = {
 
 function buildHistory(messages) {
   return messages
-    .filter(m => m.role !== 'separator' && m.role !== 'revision-sheet' && m.role !== 'revision-set' && m.role !== 'interview-prep' && m.role !== 'learning-package' && !m.isStreaming)
+    .filter(m => m.role !== 'separator' && m.role !== 'revision-sheet' && m.role !== 'revision-set' && !m.isStreaming)
     .slice(-20)
     .map(m => ({
       role: m.role === 'user' ? 'user' : 'model',
@@ -383,128 +390,11 @@ export default function ChatPanel({
     }
   }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
 
-  const handleCreateInterviewPrep = useCallback(async () => {
-    if (isLoading) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    setError(null);
-    setIsLoading(true);
-
-    const sheetId = Date.now();
-    const title = `${chapterName || bookTitle || 'Chapter'} — Préparation d'entretien`;
-
-    setMessages(prev => [...prev, { id: sheetId, role: 'interview-prep', text: '', title, isGenerating: true }]);
-
-    try {
-      const pageText = getPageText();
-      const text = await generateInterviewPrep({
-        apiKey,
-        pageText,
-        bookTitle,
-        bookAuthor,
-        chapterName,
-      });
-      setMessages(prev =>
-        prev.map(m => (m.id === sheetId ? { ...m, text, isGenerating: false } : m))
-      );
-    } catch (err) {
-      console.error('[ChatPanel] Interview prep error:', err);
-      const code = err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK';
-      setError(code);
-      setMessages(prev => prev.filter(m => m.id !== sheetId));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
-
-  const handleCreateLearningPackage = useCallback(async () => {
-    if (isLoading) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    setError(null);
-    setIsLoading(true);
-
-    const setId = Date.now();
-    const setTitle = `${chapterName || bookTitle || 'Chapter'} — Pack d'exercices`;
-    setMessages(prev => [...prev, {
-      id: setId,
-      role: 'learning-package',
-      title: setTitle,
-      phase: 'generating',
-      cards: [
-        { slug: 'exercices', title: 'Exercices', status: 'pending', text: '' },
-        { slug: 'solutions', title: 'Solutions', status: 'pending', text: '' },
-      ],
-    }]);
-
-    const controller = new AbortController();
-    streamingAbortRef.current = controller;
-
-    const patchSet = (fn) => setMessages(prev => prev.map(m => (m.id === setId ? fn(m) : m)));
-
-    try {
-      const pageText = getPageText();
-      const { exercises, solutions } = await generateLearningPackage({
-        apiKey, pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
-      });
-      patchSet(m => ({
-        ...m,
-        phase: 'done',
-        cards: [
-          { ...m.cards[0], status: 'done', text: exercises },
-          { ...m.cards[1], status: 'done', text: solutions },
-        ],
-      }));
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        patchSet(m => ({ ...m, phase: 'done' }));
-      } else {
-        console.error('[ChatPanel] Learning package error:', err);
-        const code = err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK';
-        setError(code);
-        patchSet(m => ({
-          ...m,
-          phase: 'error',
-          cards: m.cards.map(c => ({ ...c, status: 'error', errorMessage: code })),
-        }));
-      }
-    } finally {
-      setIsLoading(false);
-      streamingAbortRef.current = null;
-    }
-  }, [isLoading, bookTitle, bookAuthor, chapterName, getPageText]);
-
   const handleRetryCard = useCallback(async (setId, index) => {
     const setMsg = messages.find(m => m.id === setId);
     const sheet = setMsg?.cards?.[index];
     if (!sheet) return;
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-    // Exercices/solutions are generated together in one paired call — a
-    // single card can't be regenerated in isolation without breaking the
-    // exercise/solution numbering match, so retry re-runs the whole pair.
-    if (setMsg.role === 'learning-package') {
-      setMessages(prev => prev.map(m =>
-        m.id === setId
-          ? { ...m, phase: 'generating', cards: m.cards.map(c => ({ ...c, status: 'generating', errorMessage: undefined })) }
-          : m
-      ));
-      try {
-        const pageText = getPageText();
-        const { exercises, solutions } = await generateLearningPackage({ apiKey, pageText, bookTitle, bookAuthor, chapterName });
-        setMessages(prev => prev.map(m =>
-          m.id === setId
-            ? { ...m, phase: 'done', cards: [{ ...m.cards[0], status: 'done', text: exercises }, { ...m.cards[1], status: 'done', text: solutions }] }
-            : m
-        ));
-      } catch (err) {
-        const code = err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK';
-        setMessages(prev => prev.map(m =>
-          m.id === setId
-            ? { ...m, phase: 'error', cards: m.cards.map(c => ({ ...c, status: 'error', errorMessage: code })) }
-            : m
-        ));
-      }
-      return;
-    }
 
     setMessages(prev => prev.map(m =>
       m.id === setId
@@ -665,19 +555,16 @@ export default function ChatPanel({
             {prompts.map(prompt => (
               <div key={prompt.id} className={styles.promptRow}>
                 <button
-                  className={`${styles.suggestedBtn} ${prompt.type === 'revision-set' || prompt.type === 'learning-package' ? styles.suggestedBtnMultiStep : ''}`}
+                  className={`${styles.suggestedBtn} ${prompt.type === 'revision-set' ? styles.suggestedBtnMultiStep : ''}`}
                   style={{ color: th.text, borderColor }}
                   onClick={() => {
                     if (prompt.type === 'revision-sheet') return handleCreateRevisionSheet();
                     if (prompt.type === 'revision-set') return handleCreateRevisionSet();
-                    if (prompt.type === 'prepare-interview') return handleCreateInterviewPrep();
-                    if (prompt.type === 'learning-package') return handleCreateLearningPackage();
                     return handleSend(prompt.text);
                   }}
                   disabled={isLoading}
                   title={
                     prompt.type === 'revision-set' ? 'Génère plusieurs fiches (un appel par concept, ~1 min)'
-                    : prompt.type === 'learning-package' ? 'Génère deux fichiers pairés : exercices et solutions'
                     : undefined
                   }
                 >
@@ -762,7 +649,7 @@ export default function ChatPanel({
             );
           }
 
-          if (msg.role === 'revision-sheet' || msg.role === 'interview-prep') {
+          if (msg.role === 'revision-sheet') {
             const saveState = saveStates[msg.id];
             return (
               <div key={msg.id} className={styles.revisionSheet} style={{ borderLeftColor: '#c8a96e', background: th.bg }}>
@@ -803,7 +690,7 @@ export default function ChatPanel({
             );
           }
 
-          if (msg.role === 'revision-set' || msg.role === 'learning-package') {
+          if (msg.role === 'revision-set') {
             const doneCount = msg.cards.filter(c => c.status === 'done').length;
             const errorCount = msg.cards.filter(c => c.status === 'error').length;
             return (
@@ -927,7 +814,7 @@ export default function ChatPanel({
                     <span className={styles.cursor} />
                   </p>
                 ) : (
-                  <ReactMarkdown components={markdownComponents}>{msg.text}</ReactMarkdown>
+                  <ReactMarkdown components={markdownComponents} rehypePlugins={[rehypeHighlight]}>{msg.text}</ReactMarkdown>
                 )}
               </div>
               {detectedFiles.length > 0 && (

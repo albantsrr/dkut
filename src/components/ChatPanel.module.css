@@ -347,7 +347,8 @@
   font-weight: 700;
 }
 
-.mdInlineCode {
+/* Default: inline code (single backticks) */
+.mdCode {
   font-family: var(--font-mono);
   font-size: 0.8em;
   background: rgba(200, 169, 110, 0.12);
@@ -364,11 +365,59 @@
   overflow-x: auto;
 }
 
-.mdCodeBlock {
-  font-family: var(--font-mono);
+/* Block code (fenced ``` blocks, always wrapped in <pre>): reset the inline
+   pill styling above, use pre-formatted block typography instead. */
+.mdPre .mdCode {
+  background: none;
+  border-radius: 0;
+  padding: 0;
   font-size: 0.78rem;
   line-height: 1.55;
   white-space: pre;
+}
+
+/* Syntax highlighting (rehype-highlight) — bespoke palette matching this
+   app's warm gold/dark theme rather than a generic hljs theme stylesheet.
+   Classes are added directly to the DOM by the plugin, hence :global(). */
+:global(.hljs-comment),
+:global(.hljs-quote) {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+:global(.hljs-keyword),
+:global(.hljs-selector-tag),
+:global(.hljs-built_in),
+:global(.hljs-type) {
+  color: var(--gold-light);
+}
+
+:global(.hljs-string),
+:global(.hljs-regexp),
+:global(.hljs-addition) {
+  color: #9fbf8a;
+}
+
+:global(.hljs-number),
+:global(.hljs-literal) {
+  color: #d3976a;
+}
+
+:global(.hljs-title),
+:global(.hljs-title.function_),
+:global(.hljs-title.class_) {
+  color: var(--cream);
+}
+
+:global(.hljs-attr),
+:global(.hljs-attribute),
+:global(.hljs-variable),
+:global(.hljs-params) {
+  color: var(--text-primary);
+}
+
+:global(.hljs-deletion) {
+  color: #e07070;
 }
 
 .userMsg {

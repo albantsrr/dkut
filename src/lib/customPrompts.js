@@ -3,12 +3,16 @@ import { loadData, saveData } from './driveStorage.js';
 const DEFAULT_PROMPTS = [
   { id: 'default-revision-sheet', title: 'Create a revision sheet', text: 'Create a revision sheet', type: 'revision-sheet' },
   { id: 'default-revision-set', title: 'Générer les fiches de révision du chapitre', text: '', type: 'revision-set' },
-  { id: 'default-interview-prep', title: 'Préparer un entretien', text: '', type: 'prepare-interview' },
-  { id: 'default-learning-package', title: "Générer un pack d'exercices", text: '', type: 'learning-package' },
   { id: 'default-explain-terms', title: 'Explain difficult terms', text: 'Explain difficult terms', type: 'chat' },
   { id: 'default-comprehension', title: 'Create 3 comprehension questions', text: 'Create 3 comprehension questions', type: 'chat' },
   { id: 'default-simplify', title: 'Simplify this passage', text: 'Simplify this passage', type: 'chat' },
 ];
+
+// Ids of defaults that used to exist (free-text exercises/interview prep,
+// replaced by the QCM quiz reachable from the Reader toolbar — see
+// QuizModal.jsx). ensurePrompts() only backfills missing ids, it never
+// removes a stale one on its own, so these are dropped explicitly on load.
+const RETIRED_DEFAULT_IDS = ['default-interview-prep', 'default-learning-package'];
 
 // In-memory mirror, mirrors the pattern in progress.js. Writes here are
 // infrequent (user-triggered add/edit/delete), so no debounce is needed.
@@ -30,8 +34,10 @@ async function ensurePrompts() {
     // `customPrompts` triggers the full-seed branch below.
     const existingIds = new Set(data.customPrompts.map(p => p.id));
     const missingDefaults = DEFAULT_PROMPTS.filter(p => !existingIds.has(p.id) && !_deletedDefaultIds.has(p.id));
-    _prompts = missingDefaults.length > 0 ? [...data.customPrompts, ...missingDefaults] : data.customPrompts;
-    if (missingDefaults.length > 0) {
+    const withoutRetired = data.customPrompts.filter(p => !RETIRED_DEFAULT_IDS.includes(p.id));
+    const changed = missingDefaults.length > 0 || withoutRetired.length !== data.customPrompts.length;
+    _prompts = changed ? [...withoutRetired, ...missingDefaults] : data.customPrompts;
+    if (changed) {
       data.customPrompts = _prompts;
       await saveData(data);
     }

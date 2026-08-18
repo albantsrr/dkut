@@ -6,6 +6,7 @@ import {
 import { resetDriveStorage } from '../lib/driveStorage.js';
 import { resetProgress } from '../lib/progress.js';
 import { resetCustomPrompts } from '../lib/customPrompts.js';
+import { resetQuizProgress } from '../lib/quizProgress.js';
 import { clearAllCache } from '../lib/bookCache.js';
 
 const AuthContext = createContext(null);
@@ -66,6 +67,7 @@ export function AuthProvider({ children }) {
     resetDriveStorage();
     resetProgress();
     resetCustomPrompts();
+    resetQuizProgress();
     await clearAllCache();
     setUser(null);
   }, []);
