@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { streamChatMessage, generateRevisionSheet, generateRevisionSet, generateSheetForConcept } from '../lib/geminiApi.js';
 import { saveNotesheet } from '../lib/driveStorage.js';
 import { getAllPrompts, savePrompt, deletePrompt } from '../lib/customPrompts.js';
@@ -814,7 +817,7 @@ export default function ChatPanel({
                     <span className={styles.cursor} />
                   </p>
                 ) : (
-                  <ReactMarkdown components={markdownComponents} rehypePlugins={[rehypeHighlight]}>{msg.text}</ReactMarkdown>
+                  <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex, rehypeHighlight]}>{msg.text}</ReactMarkdown>
                 )}
               </div>
               {detectedFiles.length > 0 && (

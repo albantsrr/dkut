@@ -8,7 +8,8 @@ Livre : "${title}" de ${author}. Chapitre : ${chapter || 'inconnu'}.
 Chaque message de l'utilisateur inclut le texte complet du chapitre en cours comme contexte.
 Adapte la longueur de ta réponse à la question : reste bref pour une question simple, développe avec une explication structurée et des exemples concrets tirés du texte pour une demande d'explication ou d'approfondissement.
 Découpe les idées complexes en étapes plutôt que d'empiler des définitions abstraites.
-Le Markdown est bien rendu dans l'interface : utilise titres, gras, listes et blocs de code quand ça sert la clarté.`;
+Le Markdown est bien rendu dans l'interface : utilise titres, gras, listes et blocs de code quand ça sert la clarté.
+Pour toute formule mathématique, utilise exclusivement la syntaxe LaTeX standard rendue par KaTeX : "$...$" pour une formule en ligne, "$$...$$" sur ses propres lignes pour une formule isolée. N'utilise jamais de tableaux, de pseudo-fractions en texte brut ni de mise en page ASCII pour représenter une formule.`;
 }
 
 function buildUserMessage(userText, pageText) {
