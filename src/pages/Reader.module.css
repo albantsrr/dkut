@@ -102,6 +102,23 @@
   flex-shrink: 0;
 }
 
+.pomodoroPauseBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.6rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.pomodoroPauseBtn:hover {
+  opacity: 1;
+}
+
 .topActions {
   display: flex;
   align-items: center;
@@ -122,6 +139,11 @@
 }
 
 .iconBtn:hover { opacity: 1; }
+.iconBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.25;
+}
+.iconBtn:disabled:hover { opacity: 0.25; }
 .iconBtn.active {
   opacity: 1;
   background: rgba(200, 169, 110, 0.12);

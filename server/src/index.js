@@ -8,6 +8,7 @@ import progressRouter from './routes/progress.js';
 import promptsRouter from './routes/prompts.js';
 import quizRouter from './routes/quiz.js';
 import pomodoroRouter from './routes/pomodoro.js';
+import pomodoroSettingsRouter from './routes/pomodoroSettings.js';
 import revisionSheetsRouter from './routes/revisionSheets.js';
 import aiRouter from './routes/ai.js';
 
@@ -32,6 +33,7 @@ app.use(progressRouter);
 app.use(promptsRouter);
 app.use(quizRouter);
 app.use(pomodoroRouter);
+app.use(pomodoroSettingsRouter);
 app.use(revisionSheetsRouter);
 app.use(aiRouter);
 

@@ -108,8 +108,10 @@ export async function* generateRevisionSet({ pageText, bookTitle, bookAuthor, ch
 }
 
 /**
- * Generates a multiple-choice quiz (mode: 'exercise' | 'interview') for the
- * current chapter, as a single call. Returns a validated array of questions.
+ * Generates a quiz for the current chapter, as a single call. mode:
+ * 'interview' returns multiple-choice questions; mode: 'exercise' returns
+ * open-ended, AI-graded exercises (see gradeExercise below) — both come back
+ * as the same `questions` array, just with a different item shape.
  */
 export async function generateQuiz({ mode, pageText, bookTitle, bookAuthor, chapterName, signal }) {
   const res = await postAI('/ai/quiz', { mode, pageText, bookTitle, bookAuthor, chapterName }, signal);
@@ -118,15 +120,26 @@ export async function generateQuiz({ mode, pageText, bookTitle, bookAuthor, chap
 }
 
 /**
- * Generates 2-3 short practice exercises grounded in the text read during one
- * Pomodoro reading cycle. Deliberately not cached anywhere (unlike
- * generateQuiz) — each cycle asks a fresh question, and nothing is persisted
- * until the whole cycle is scored (see pomodoroLog.js).
+ * Generates 2-3 short open-ended practice exercises grounded in the text
+ * read during one Pomodoro reading cycle. Deliberately not cached anywhere
+ * (unlike generateQuiz) — each cycle asks fresh exercises, and nothing is
+ * persisted until the whole cycle is scored (see pomodoroLog.js).
  */
 export async function generateSessionExercises({ pageText, bookTitle, bookAuthor, chapterName, signal }) {
   const res = await postAI('/ai/session-exercises', { pageText, bookTitle, bookAuthor, chapterName }, signal);
   const { questions } = await res.json();
   return questions;
+}
+
+/**
+ * Grades one submitted answer to an open exercise (mode: 'exercise' item
+ * shape, see generateQuiz/generateSessionExercises). Called once per
+ * submission — never pre-computed at generation time. Returns
+ * { verdict: 'correct'|'partial'|'incorrect', feedback }.
+ */
+export async function gradeExercise({ exercise, pageText, userAnswer, bookTitle, bookAuthor, chapterName, signal }) {
+  const res = await postAI('/ai/grade-exercise', { exercise, pageText, userAnswer, bookTitle, bookAuthor, chapterName }, signal);
+  return res.json();
 }
 
 /**

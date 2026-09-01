@@ -6,7 +6,7 @@ import { getAllProgress, clearProgress } from '../lib/progress.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TranslateBookModal from '../components/TranslateBookModal.jsx';
 import ReadingModeModal from '../components/ReadingModeModal.jsx';
-import ImportFromDriveModal from '../components/ImportFromDriveModal.jsx';
+import UserMenu from '../components/UserMenu.jsx';
 import styles from './Library.module.css';
 
 const SPINE_COLORS = [
@@ -68,7 +68,6 @@ export default function Library() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [translatingBook, setTranslatingBook] = useState(null);
   const [choosingBook, setChoosingBook] = useState(null);
-  const [importingFromDrive, setImportingFromDrive] = useState(false);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
@@ -154,12 +153,6 @@ export default function Library() {
     getAllBooks().then(setBooks).catch(() => {});
   }, []);
 
-  const handleImported = useCallback(() => {
-    Promise.all([getAllBooks(), getAllProgress().catch(() => ({}))])
-      .then(([b, p]) => { setBooks(b); setProgressMap(p); })
-      .catch(() => {});
-  }, []);
-
   return (
     <div className={styles.page}>
       {/* Header */}
@@ -173,17 +166,7 @@ export default function Library() {
           <span />
         </div>
         <div className={styles.userBar}>
-          {user?.picture && (
-            <img src={user.picture} alt={user.name} className={styles.avatar} referrerPolicy="no-referrer" />
-          )}
-          <span className={styles.userEmail}>{user?.email}</span>
-          <button className={styles.syncBtn} onClick={() => navigate('/stats')} title="Statistiques d'apprentissage">
-            Stats
-          </button>
-          <button className={styles.syncBtn} onClick={() => setImportingFromDrive(true)} title="Importer les anciennes données Google Drive">
-            Importer depuis Drive
-          </button>
-          <button className={styles.signOutBtn} onClick={signOut}>Sign out</button>
+          <UserMenu user={user} onSignOut={signOut} />
         </div>
       </header>
 
@@ -392,12 +375,6 @@ export default function Library() {
         />
       )}
 
-      {importingFromDrive && (
-        <ImportFromDriveModal
-          onClose={() => setImportingFromDrive(false)}
-          onImported={handleImported}
-        />
-      )}
     </div>
   );
 }

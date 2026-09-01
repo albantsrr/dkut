@@ -4,14 +4,13 @@ import Epub from 'epubjs';
 import { getBook } from '../utils/storage.js';
 import { getProgress, saveProgress, clearProgress, flushProgress } from '../lib/progress.js';
 import { getAllQuizProgress } from '../lib/quizProgress.js';
+import { getPomodoroSettings } from '../lib/pomodoroSettings.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 import styles from './Reader.module.css';
 import ChatPanel from '../components/ChatPanel.jsx';
 import QuizModal from '../components/QuizModal.jsx';
 import PomodoroModal from '../components/PomodoroModal.jsx';
-
-// Pomodoro learning mode: length of one reading cycle before the end-of-cycle
-// exercise modal fires (see PomodoroModal.jsx for the break length).
-const CYCLE_MINUTES = 25;
+import UserMenu from '../components/UserMenu.jsx';
 
 function formatClock(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
@@ -61,6 +60,7 @@ export default function Reader() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, signOut } = useAuth();
   // Locked for the whole reading session at mount — no mid-session toggle.
   // Falls back to free reading if router state is missing (page refresh,
   // direct URL): never silently force learning mode without an explicit choice.
@@ -103,12 +103,20 @@ export default function Reader() {
   // ── Pomodoro learning mode ──
   const currentChapterRef = useRef({ href: '', label: '' }); // mirrors currentChapter/currentChapterHref, read from the cycle timer's interval closure so it never goes stale
   const activeQuizModeRef = useRef(null); // mirrors activeQuizMode, same reason
-  const cycleChaptersRef = useRef(new Map()); // Map<href, {label, text}> read during the active cycle, cleared each cycle
+  const cycleChaptersRef = useRef(new Map()); // Map<href, {label, text, startLoc, endLoc}> read during the active cycle, cleared each cycle
+  const chapterLocRangeRef = useRef(new Map()); // Map<href, {startLoc, endLoc}>, updated on every relocate — first/last epubjs location number seen in each chapter this cycle
   const cycleTimerRef = useRef(null);
   const cycleEndAtRef = useRef(null);
   const cycleDueRef = useRef(false); // cycle timer fired but modal display was deferred (a manual quiz was open)
-  const [cycleSecondsLeft, setCycleSecondsLeft] = useState(CYCLE_MINUTES * 60);
+  const pausedRemainingMsRef = useRef(null); // time left when paused, so resuming restores the same deadline offset instead of resetting it
+  const [pomodoroSettings, setPomodoroSettings] = useState(null); // { cycleMinutes, breakMinutes }, loaded once from the backend
+  const [cycleSecondsLeft, setCycleSecondsLeft] = useState(25 * 60); // placeholder until the first cycle actually starts
   const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false);
+  const [cyclePaused, setCyclePaused] = useState(false);
+
+  useEffect(() => {
+    getPomodoroSettings().then(setPomodoroSettings);
+  }, []);
 
   const applyTheme = useCallback((rendition, t, size) => {
     const th = THEMES[t];
@@ -185,14 +193,15 @@ export default function Reader() {
 
   useEffect(() => { activeQuizModeRef.current = activeQuizMode; }, [activeQuizMode]);
 
-  // Fires when the 25-minute wall-clock deadline is reached. The deadline
-  // itself is never paused, but if a manual quiz happens to be open right
-  // now, only the modal's *display* is deferred (see the effect below) so
-  // the two full-screen overlays never stack.
+  // Fires when the wall-clock deadline is reached. A manual pause clears the
+  // timer entirely (see pauseCycle below) so this never fires while paused.
+  // If a manual quiz happens to be open right now, only the modal's *display*
+  // is deferred (see the effect below) so the two full-screen overlays never
+  // stack.
   const onCycleComplete = useCallback(() => {
     const { href, label } = currentChapterRef.current;
     if (href) {
-      cycleChaptersRef.current.set(href, { label, text: pageTextRef.current });
+      cycleChaptersRef.current.set(href, { label, text: pageTextRef.current, ...chapterLocRangeRef.current.get(href) });
     }
     cycleDueRef.current = true;
     if (!activeQuizModeRef.current) {
@@ -201,15 +210,11 @@ export default function Reader() {
     }
   }, []);
 
-  const startCycle = useCallback(() => {
-    cycleChaptersRef.current = new Map();
-    cycleDueRef.current = false;
-    cycleEndAtRef.current = Date.now() + CYCLE_MINUTES * 60_000;
-    setCycleSecondsLeft(CYCLE_MINUTES * 60);
+  // Deadline-based (recomputed from Date.now() each tick), not a decrementing
+  // tick counter — stays correct after a backgrounded/throttled tab or sleep,
+  // where a naive counter would drift or fire a burst of stale ticks on wake.
+  const runCycleTimer = useCallback(() => {
     clearInterval(cycleTimerRef.current);
-    // Deadline-based (recomputed from Date.now() each tick), not a decrementing
-    // tick counter — stays correct after a backgrounded/throttled tab or sleep,
-    // where a naive counter would drift or fire a burst of stale ticks on wake.
     cycleTimerRef.current = setInterval(() => {
       const remaining = cycleEndAtRef.current - Date.now();
       if (remaining <= 0) {
@@ -221,6 +226,32 @@ export default function Reader() {
     }, 1000);
   }, [onCycleComplete]);
 
+  const startCycle = useCallback(() => {
+    const cycleMinutes = pomodoroSettings?.cycleMinutes ?? 25;
+    cycleChaptersRef.current = new Map();
+    chapterLocRangeRef.current = new Map();
+    cycleDueRef.current = false;
+    pausedRemainingMsRef.current = null;
+    setCyclePaused(false);
+    cycleEndAtRef.current = Date.now() + cycleMinutes * 60_000;
+    setCycleSecondsLeft(cycleMinutes * 60);
+    runCycleTimer();
+  }, [runCycleTimer, pomodoroSettings]);
+
+  const pauseCycle = useCallback(() => {
+    if (cyclePaused) return;
+    pausedRemainingMsRef.current = Math.max(0, cycleEndAtRef.current - Date.now());
+    clearInterval(cycleTimerRef.current);
+    setCyclePaused(true);
+  }, [cyclePaused]);
+
+  const resumeCycle = useCallback(() => {
+    if (!cyclePaused) return;
+    cycleEndAtRef.current = Date.now() + (pausedRemainingMsRef.current ?? 0);
+    runCycleTimer();
+    setCyclePaused(false);
+  }, [cyclePaused, runCycleTimer]);
+
   // Opens the deferred modal once the manual quiz that was blocking it closes.
   useEffect(() => {
     if (cycleDueRef.current && !activeQuizMode && !pomodoroModalOpen) {
@@ -230,14 +261,15 @@ export default function Reader() {
     }
   }, [activeQuizMode, pomodoroModalOpen]);
 
-  // Starts the first cycle once the book is ready. Only runs once (startCycle
-  // has a stable identity) — restarting subsequent cycles is driven by
+  // Starts the first cycle once the book is ready and the user's cycle-length
+  // setting has loaded. Only runs once (startCycle has a stable identity while
+  // pomodoroSettings is unchanged) — restarting subsequent cycles is driven by
   // PomodoroModal's onCycleFinished calling startCycle() directly, not by this effect.
   useEffect(() => {
-    if (!isLearningMode || !ready) return;
+    if (!isLearningMode || !ready || !pomodoroSettings) return;
     startCycle();
     return () => clearInterval(cycleTimerRef.current);
-  }, [isLearningMode, ready, startCycle]);
+  }, [isLearningMode, ready, pomodoroSettings, startCycle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -279,12 +311,13 @@ export default function Reader() {
           if (cancelled || !locationsReadyRef.current) return;
           const cfi = loc.start.cfi;
           let pct = 0;
+          let locNum = null;
           if (book.locations.length()) {
             try { pct = Math.round(book.locations.percentageFromCfi(cfi) * 100); }
             catch { /* CFI out of bounds after DOM translation */ }
             if (book.locations.total) {
               try {
-                const locNum = book.locations.locationFromCfi(cfi);
+                locNum = book.locations.locationFromCfi(cfi);
                 setLocDebug(`${locNum ?? '?'} / ${book.locations.total}`);
               } catch { /* ignore */ }
             }
@@ -301,6 +334,15 @@ export default function Reader() {
           );
           const newLabel = match?.label?.trim() || '';
 
+          // Tracks the first/last epubjs location number seen in each chapter
+          // during the active cycle, so the Pomodoro modal can show a "page
+          // X–Y" range alongside the chapter name (see cycleChaptersRef below).
+          if (isLearningMode && newHref && locNum != null) {
+            const range = chapterLocRangeRef.current.get(newHref) ?? { startLoc: locNum, endLoc: locNum };
+            range.endLoc = locNum;
+            chapterLocRangeRef.current.set(newHref, range);
+          }
+
           // Chapter transition detected: pageTextRef still holds the text of
           // the chapter we're leaving (the RAF below hasn't overwritten it
           // yet) — snapshot it now so the end-of-chapter nudge (free reading)
@@ -314,6 +356,7 @@ export default function Reader() {
               cycleChaptersRef.current.set(leftHref, {
                 label: prevChapterRef.current.label,
                 text: pageTextRef.current,
+                ...chapterLocRangeRef.current.get(leftHref),
               });
             } else if (!nudgedChaptersRef.current.has(leftHref)) {
               nudgedChaptersRef.current.add(leftHref);
@@ -575,9 +618,17 @@ export default function Reader() {
         <div className={styles.topTitle} style={{ color: th.text }}>
           {metadata?.title}
         </div>
-        {isLearningMode && (
-          <span className={styles.pomodoroPill} style={{ color: th.text, borderColor: `${th.text}30` }} title="Session Pomodoro en cours">
-            Pomodoro · {formatClock(cycleSecondsLeft)}
+        {isLearningMode && !pomodoroModalOpen && (
+          <span className={styles.pomodoroPill} style={{ color: th.text, borderColor: `${th.text}30` }} title={cyclePaused ? 'Session Pomodoro en pause' : 'Session Pomodoro en cours'}>
+            <button
+              className={styles.pomodoroPauseBtn}
+              onClick={(e) => { e.stopPropagation(); cyclePaused ? resumeCycle() : pauseCycle(); }}
+              title={cyclePaused ? 'Reprendre' : 'Mettre en pause'}
+              style={{ color: th.text }}
+            >
+              {cyclePaused ? '▶' : '❚❚'}
+            </button>
+            Pomodoro · {formatClock(cycleSecondsLeft)}{cyclePaused ? ' · pause' : ''}
           </span>
         )}
         <div className={styles.topActions}>
@@ -595,7 +646,8 @@ export default function Reader() {
           <button
             className={`${styles.iconBtn} ${showQuizPicker ? styles.active : ''}`}
             onClick={(e) => { e.stopPropagation(); setShowQuizPicker(v => !v); setShowSettings(false); setShowToc(false); }}
-            title="Quiz"
+            disabled={!currentChapterHref}
+            title={currentChapterHref ? 'Quiz' : 'Quiz (chapitre en cours de détection…)'}
             style={{ color: th.text }}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -642,6 +694,7 @@ export default function Reader() {
               <line x1="2" y1="12" x2="10" y2="12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
           </button>
+          <UserMenu user={user} onSignOut={signOut} />
         </div>
       </header>
 
@@ -928,8 +981,10 @@ export default function Reader() {
           bookId={id}
           bookTitle={metadata?.title || ''}
           bookAuthor={metadata?.creator || ''}
-          cycleMinutes={CYCLE_MINUTES}
+          cycleMinutes={pomodoroSettings?.cycleMinutes ?? 25}
+          breakMinutes={pomodoroSettings?.breakMinutes ?? 5}
           chapters={Array.from(cycleChaptersRef.current.values())}
+          totalLocations={bookRef.current?.locations?.total}
           onCycleFinished={() => {
             setPomodoroModalOpen(false);
             startCycle();

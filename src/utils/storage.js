@@ -7,11 +7,7 @@ import { cacheEpub, getCachedEpub, evictBook } from '../lib/bookCache.js';
 // Hard-capped at 7 s: book.coverUrl() or fetch(coverUrl) can hang indefinitely on
 // some EPUBs (blob URL race / missing resource), which would freeze getBook() and
 // leave the Reader spinner on-screen forever.
-// Exported (not just used internally by saveTranslatedBook) so
-// ImportFromDriveModal.jsx can reuse the same extraction logic when
-// re-uploading books read back from Drive, which never carry a pre-extracted
-// cover the way a fresh upload from Library.jsx's extractMeta() does.
-export async function extractCover(arrayBuffer) {
+async function extractCover(arrayBuffer) {
   return new Promise((resolve) => {
     let settled = false;
     const settle = (val) => { if (!settled) { settled = true; resolve(val); } };

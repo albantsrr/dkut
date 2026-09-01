@@ -7,6 +7,7 @@ import { resetProgress } from '../lib/progress.js';
 import { resetCustomPrompts } from '../lib/customPrompts.js';
 import { resetQuizProgress } from '../lib/quizProgress.js';
 import { resetPomodoroLog } from '../lib/pomodoroLog.js';
+import { resetPomodoroSettings } from '../lib/pomodoroSettings.js';
 import { clearAllCache } from '../lib/bookCache.js';
 import { apiPostJson, apiPost } from '../lib/api.js';
 
@@ -23,13 +24,9 @@ async function fetchUserInfo() {
 
 // Piggybacks a backend session (server/) on top of the existing Google OAuth
 // access token — see server/src/routes/auth.js. Sign-in itself still goes
-// through the original Drive OAuth2 popup (src/lib/googleAuth.js): the
-// backend never needed a competing ID-token/GIS-button flow, it just needed
-// a token to verify. The `drive` scope that flow still requests is now wider
-// than anything in this app actually calls (everything migrated off Drive as
-// of MIGRATION_PLAN.md phase 3) — narrowing it is a separate cleanup, not
-// done here since it requires a SCOPE_VER bump and forces re-consent for
-// every signed-in user. A failure here must never block sign-in itself.
+// through the original OAuth2 popup (src/lib/googleAuth.js): the backend
+// never needed a competing ID-token/GIS-button flow, it just needed a token
+// to verify. A failure here must never block sign-in itself.
 async function establishBackendSession() {
   try {
     await apiPostJson('/auth/google', { accessToken: getAccessToken() });
@@ -89,6 +86,7 @@ export function AuthProvider({ children }) {
     resetCustomPrompts();
     resetQuizProgress();
     resetPomodoroLog();
+    resetPomodoroSettings();
     await clearAllCache();
     setUser(null);
   }, []);

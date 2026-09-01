@@ -8,7 +8,9 @@
 >
 > Note (Phase 4) : le câblage bout-en-bout vers l'API Gemini est vérifié (auth, streaming, NDJSON, gestion d'erreur — voir `POST /ai/chat` et `POST /ai/revision-set` testés en direct), mais la clé `GEMINI_API_KEY` existante a ses crédits prépayés épuisés (429 côté Google, indépendant de cette migration — même clé, même compte que l'ancienne implémentation côté client). Les tests de validation (`NO_API_KEY`, `NO_PAGE_TEXT`, gating auth) sont tous passés ; seule une génération réussie avec du vrai contenu généré n'a pas pu être observée. Rien à corriger côté code — juste besoin d'une clé avec du crédit (ou d'attendre le renouvellement) pour un test complet en conditions réelles.
 >
-> Note (Phase 5) : rebâtie en import in-app plutôt qu'en script Node autonome (voir la discussion dans la conversation) — le scope `drive` de l'OAuth existant reste donc nécessaire, pas seulement toléré comme "vestige temporaire". Pas testable par l'agent (nécessite un vrai compte Google Drive avec de vraies données) ; le build passe et la relecture logique du code est faite, mais un test réel en navigateur reste à faire par toi.
+> Note (Phase 5) : rebâtie en import in-app plutôt qu'en script Node autonome (voir la discussion dans la conversation) — le scope `drive` de l'OAuth existant restait donc nécessaire, pas seulement toléré comme "vestige temporaire", tant que l'outil existait.
+>
+> Post-migration (2026-09) : l'outil d'import Drive (`ImportFromDriveModal.jsx`) et les fichiers `driveApi.js`/`driveStorage.js` ont été supprimés — plus nécessaires une fois la migration personnelle faite. Le scope OAuth `drive` a été retiré en même temps (`googleAuth.js`, `SCOPE_VER` bumpée à `v5`). Voir CLAUDE.md pour l'état actuel.
 
 ## Contexte
 

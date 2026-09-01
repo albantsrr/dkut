@@ -1,9 +1,9 @@
 const CLIENT_ID   = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-const SCOPE       = 'https://www.googleapis.com/auth/drive email profile openid';
+const SCOPE       = 'email profile openid';
 const TOKEN_KEY   = 'gauth_token';
 const EXPIRY_KEY  = 'gauth_expiry';
 const SCOPE_KEY   = 'gauth_scope';
-const SCOPE_VER   = 'v4'; // bumped: forces re-consent to ensure drive scope is granted
+const SCOPE_VER   = 'v5'; // bumped: drops the drive scope, no longer needed (Drive import tool removed)
 
 let _tokenClient = null;
 
@@ -53,44 +53,20 @@ export function requestSignIn() {
     // True when this is a silent background refresh (user already signed in).
     // In that case we must not show any popup on failure.
     const isSilentRefresh = isSignedIn();
-    let retried = false;
 
-    const doRequest = (prompt) => {
-      _tokenClient.callback = (response) => {
-        if (response.error) { reject(new Error(response.error)); return; }
+    _tokenClient.callback = (response) => {
+      if (response.error) { reject(new Error(response.error)); return; }
 
-        // Google may omit `scope` when all requested scopes were granted (RFC 6749 §5.1).
-        // Only reject when Google *explicitly* tells us which scopes were granted and
-        // Drive is absent — this is the root cause of ~50% 403s after a reconnect:
-        // GIS can silently bypass the consent screen and issue a token without Drive scope.
-        if (response.scope) {
-          const granted = response.scope.split(/\s+/);
-          if (!granted.some(s => s.includes('drive'))) {
-            if (!isSilentRefresh && !retried) {
-              // First explicit sign-in attempt: force the full consent screen and retry.
-              retried = true;
-              doRequest('consent');
-              return;
-            }
-            // Silent refresh or second attempt: surface the error so the caller can
-            // sign the user out and prompt them to re-authenticate manually.
-            reject(new Error('drive_scope_missing'));
-            return;
-          }
-        }
-
-        localStorage.setItem(TOKEN_KEY, response.access_token);
-        localStorage.setItem(EXPIRY_KEY, String(Date.now() + response.expires_in * 1000));
-        localStorage.setItem(SCOPE_KEY, SCOPE_VER);
-        resolve();
-      };
-      _tokenClient.requestAccessToken({ prompt });
+      localStorage.setItem(TOKEN_KEY, response.access_token);
+      localStorage.setItem(EXPIRY_KEY, String(Date.now() + response.expires_in * 1000));
+      localStorage.setItem(SCOPE_KEY, SCOPE_VER);
+      resolve();
     };
 
     // prompt: '' reuses existing consent silently (used for proactive token refresh).
-    // 'select_account consent' forces the account picker + full consent screen so
-    // Google cannot silently auto-grant a token that lacks the Drive scope.
-    doRequest(isSilentRefresh ? '' : 'select_account consent');
+    // 'select_account consent' forces the account picker + full consent screen on
+    // an explicit sign-in.
+    _tokenClient.requestAccessToken({ prompt: isSilentRefresh ? '' : 'select_account consent' });
   });
 }
 

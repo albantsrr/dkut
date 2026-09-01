@@ -1,19 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
 import { generateSessionExercises } from '../lib/geminiApi.js';
 import { recordCompletedCycle } from '../lib/pomodoroLog.js';
+import OpenExercisePlayer from './OpenExercisePlayer.jsx';
 import styles from './PomodoroModal.module.css';
-
-const BREAK_MINUTES = 5;
-
-const markdownComponents = {
-  p: ({ node, ...props }) => <p className={styles.mdP} {...props} />,
-  code: ({ node, className, ...props }) => (
-    <code className={[styles.mdCode, className].filter(Boolean).join(' ')} {...props} />
-  ),
-  pre: ({ node, ...props }) => <pre className={styles.mdPre} {...props} />,
-};
 
 function formatClock(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
@@ -40,15 +29,19 @@ function scoreMessage(score, total) {
  * Reader entirely is the only way out of an active cycle — consistent with
  * an interrupted cycle never being counted (see pomodoroLog.js).
  */
-export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinutes, chapters, onCycleFinished }) {
+function formatChapterRange(chapter, totalLocations) {
+  const { startLoc, endLoc } = chapter;
+  if (startLoc == null || endLoc == null) return '';
+  const range = startLoc === endLoc ? `page ${startLoc}` : `pages ${startLoc}–${endLoc}`;
+  return totalLocations ? `${range} / ${totalLocations}` : range;
+}
+
+export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinutes, breakMinutes = 5, chapters, totalLocations, onCycleFinished }) {
   const [phase, setPhase] = useState('generating'); // generating | playing | summary | break | error
   const [questions, setQuestions] = useState([]);
-  const [current, setCurrent] = useState(0);
-  const [selected, setSelected] = useState(null);
-  const [answered, setAnswered] = useState(false);
   const [score, setScore] = useState(0);
   const [error, setError] = useState(null);
-  const [breakSecondsLeft, setBreakSecondsLeft] = useState(BREAK_MINUTES * 60);
+  const [breakSecondsLeft, setBreakSecondsLeft] = useState(breakMinutes * 60);
   const abortRef = useRef(null);
   const breakTimerRef = useRef(null);
   const breakEndAtRef = useRef(null);
@@ -66,9 +59,6 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
         pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
       });
       setQuestions(generated);
-      setCurrent(0);
-      setSelected(null);
-      setAnswered(false);
       setScore(0);
       setPhase('playing');
     } catch (err) {
@@ -86,14 +76,8 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selectOption = (i) => {
-    if (answered) return;
-    setSelected(i);
-    setAnswered(true);
-    if (i === questions[current].correctIndex) setScore(s => s + 1);
-  };
-
   const finish = useCallback((finalScore) => {
+    setScore(finalScore);
     setPhase('summary');
     recordCompletedCycle(bookId, {
       durationMinutes: cycleMinutes,
@@ -102,20 +86,9 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
     }).catch(err => console.error('[PomodoroModal] record cycle error:', err));
   }, [bookId, cycleMinutes, questions.length]);
 
-  const nextQuestion = () => {
-    const isLast = current + 1 >= questions.length;
-    if (isLast) {
-      finish(score);
-      return;
-    }
-    setCurrent(c => c + 1);
-    setSelected(null);
-    setAnswered(false);
-  };
-
   const startBreak = useCallback(() => {
-    breakEndAtRef.current = Date.now() + BREAK_MINUTES * 60_000;
-    setBreakSecondsLeft(BREAK_MINUTES * 60);
+    breakEndAtRef.current = Date.now() + breakMinutes * 60_000;
+    setBreakSecondsLeft(breakMinutes * 60);
     setPhase('break');
     clearInterval(breakTimerRef.current);
     breakTimerRef.current = setInterval(() => {
@@ -127,7 +100,7 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
         setBreakSecondsLeft(Math.ceil(remaining / 1000));
       }
     }, 1000);
-  }, [onCycleFinished]);
+  }, [onCycleFinished, breakMinutes]);
 
   useEffect(() => () => clearInterval(breakTimerRef.current), []);
 
@@ -135,7 +108,21 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
     <div className={styles.overlay}>
       <div className={styles.modal}>
         <div className={styles.header}>
-          <span className={styles.headerLabel}>Session Pomodoro — {chapterName || bookTitle}</span>
+          <span className={styles.headerLabel}>Session Pomodoro</span>
+          {chapters.length > 0 ? (
+            <ul className={styles.headerChapters}>
+              {chapters.map((c, i) => {
+                const range = formatChapterRange(c, totalLocations);
+                return (
+                  <li key={i} className={styles.headerChapterItem}>
+                    {c.label || bookTitle}{range && <span className={styles.headerChapterRange}> — {range}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <span className={styles.headerChapterItem}>{bookTitle}</span>
+          )}
         </div>
 
         <div className={styles.body}>
@@ -159,54 +146,15 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
             </div>
           )}
 
-          {phase === 'playing' && questions[current] && (
-            <div className={styles.playing}>
-              <div className={styles.progressRow}>
-                <div className={styles.progressTrack}>
-                  <div className={styles.progressFill} style={{ width: `${(current / questions.length) * 100}%` }} />
-                </div>
-                <span className={styles.progressCount}>{current + 1}/{questions.length}</span>
-              </div>
-
-              <div className={styles.questionText}>
-                <ReactMarkdown components={markdownComponents} rehypePlugins={[rehypeHighlight]}>
-                  {questions[current].question}
-                </ReactMarkdown>
-              </div>
-
-              <div className={styles.options}>
-                {questions[current].options.map((opt, i) => {
-                  const isCorrect = i === questions[current].correctIndex;
-                  const isSelected = i === selected;
-                  const cls = [
-                    styles.option,
-                    answered && isCorrect ? styles.optionCorrect : '',
-                    answered && isSelected && !isCorrect ? styles.optionWrong : '',
-                  ].filter(Boolean).join(' ');
-                  return (
-                    <button key={i} className={cls} onClick={() => selectOption(i)} disabled={answered}>
-                      <ReactMarkdown components={markdownComponents} rehypePlugins={[rehypeHighlight]}>
-                        {opt}
-                      </ReactMarkdown>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {answered && (
-                <div className={styles.explanation}>
-                  <ReactMarkdown components={markdownComponents} rehypePlugins={[rehypeHighlight]}>
-                    {questions[current].explanation}
-                  </ReactMarkdown>
-                </div>
-              )}
-
-              {answered && (
-                <button className={styles.primaryBtn} onClick={nextQuestion}>
-                  {current + 1 >= questions.length ? 'Voir les résultats' : 'Suivant'}
-                </button>
-              )}
-            </div>
+          {phase === 'playing' && questions.length > 0 && (
+            <OpenExercisePlayer
+              exercises={questions}
+              pageText={pageText}
+              bookTitle={bookTitle}
+              bookAuthor={bookAuthor}
+              chapterName={chapterName}
+              onAllGraded={finish}
+            />
           )}
 
           {phase === 'summary' && (

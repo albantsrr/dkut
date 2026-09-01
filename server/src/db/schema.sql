@@ -3,13 +3,21 @@
 -- route/logic additions, not further migrations.
 
 CREATE TABLE IF NOT EXISTS users (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  google_sub TEXT NOT NULL UNIQUE,
-  email      TEXT NOT NULL,
-  name       TEXT NOT NULL,
-  picture    TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  google_sub             TEXT NOT NULL UNIQUE,
+  email                  TEXT NOT NULL,
+  name                   TEXT NOT NULL,
+  picture                TEXT,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  pomodoro_cycle_minutes INTEGER NOT NULL DEFAULT 25,
+  pomodoro_break_minutes INTEGER NOT NULL DEFAULT 5
 );
+-- schema.sql is re-applied as-is on every `npm run migrate` (no versioned
+-- migration runner, see server/src/db/migrate.js) — CREATE TABLE IF NOT
+-- EXISTS alone wouldn't add these columns to a database that already has the
+-- `users` table from before this change, hence the explicit ALTERs below.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS pomodoro_cycle_minutes INTEGER NOT NULL DEFAULT 25;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS pomodoro_break_minutes INTEGER NOT NULL DEFAULT 5;
 
 CREATE TABLE IF NOT EXISTS books (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),

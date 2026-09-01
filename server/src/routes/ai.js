@@ -24,8 +24,12 @@ function abortOnClose(res) {
   return controller.signal;
 }
 
+const CLIENT_ERROR_CODES = new Set(['NO_PAGE_TEXT', 'INVALID_GRADING', 'EMPTY_ANSWER']);
+
 function errorStatus(message) {
-  return message === 'NO_API_KEY' ? 503 : message === 'NO_PAGE_TEXT' ? 400 : 500;
+  if (message === 'NO_API_KEY') return 503;
+  if (CLIENT_ERROR_CODES.has(message)) return 400;
+  return 500;
 }
 
 router.post('/ai/chat', requireAuth, async (req, res) => {
@@ -126,6 +130,23 @@ router.post('/ai/session-exercises', requireAuth, async (req, res) => {
   } catch (err) {
     if (err.name === 'AbortError') { res.end(); return; }
     console.error('[ai/session-exercises]', err);
+    res.status(errorStatus(err.message)).json({ error: err.message || 'NETWORK' });
+  }
+});
+
+router.post('/ai/grade-exercise', requireAuth, async (req, res) => {
+  const { exercise, pageText, userAnswer, bookTitle, bookAuthor, chapterName } = req.body ?? {};
+  if (!userAnswer || !userAnswer.trim()) {
+    res.status(400).json({ error: 'EMPTY_ANSWER' });
+    return;
+  }
+  const signal = abortOnClose(res);
+  try {
+    const graded = await gemini.gradeOpenExercise({ exercise, pageText, userAnswer, bookTitle, bookAuthor, chapterName, signal });
+    res.json(graded);
+  } catch (err) {
+    if (err.name === 'AbortError') { res.end(); return; }
+    console.error('[ai/grade-exercise]', err);
     res.status(errorStatus(err.message)).json({ error: err.message || 'NETWORK' });
   }
 });

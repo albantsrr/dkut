@@ -330,29 +330,13 @@ const QUIZ_SCHEMA = {
   required: ['questions'],
 };
 
-// Deliberately distinct from ANTI_FABRICATION_RULES: revision sheets must
-// never invent examples, but exercises exist specifically to test new
-// practice scenarios — they just need to stay inside what the chapter
-// actually taught, and favor reasoning over plain definition recall.
-const EXERCISE_QUIZ_RULES = `Règles strictes :
-- N'utilise QUE les fonctions, méthodes, syntaxe et concepts réellement enseignés dans le texte fourni.
-- Varie les types de questions plutôt que d'empiler des questions de définition ; mélange par exemple :
-  - prédire le résultat d'un court extrait de code ("Que va afficher ce code ?") ;
-  - repérer lequel de plusieurs extraits similaires contient un bug ;
-  - compléter une ligne manquante d'un extrait, à choix parmi 4 propositions.
-- Le code affiché dans "question" ou "options" est toujours en LECTURE SEULE — l'utilisateur ne fait que choisir une réponse, il n'écrit jamais de code. Utilise des blocs Markdown fencés (\`\`\`) pour tout extrait de code.
-- Si une question fait référence à "ce code" ou à un extrait ("Que va afficher ce code ?", "lequel de ces extraits contient un bug ?"), l'extrait de code correspondant DOIT être recopié intégralement et littéralement dans le champ "question" (ou réparti dans "options" pour un choix entre extraits) — ne JAMAIS décrire un code sans le montrer, ne jamais supposer que le lecteur connaît déjà l'extrait auquel tu fais allusion.
-- Chaque question doit être ENTIÈREMENT AUTONOME : si le code de la question utilise une classe, fonction ou variable définie plus tôt dans le chapitre (ex. une classe "Vector" présentée dans un exemple précédent), la définition complète de cette classe/fonction DOIT être recopiée dans le champ "question", juste avant le code de la question elle-même — dans le même bloc ou dans un second bloc de code séparé. N'utilise JAMAIS une formulation du type "en utilisant la classe X de l'exemple N" sans reproduire intégralement ce que cette classe/cet exemple contient : le lecteur n'a que le texte de la question sous les yeux, pas le reste du chapitre.
-- Les 4 options doivent être plausibles (pas de distracteur absurde), une seule strictement correcte.
-- Le code lui-même (identifiants, commentaires) doit toujours être en anglais, conformément aux conventions Python standard, même si l'énoncé est en français.`;
-
 const INTERVIEW_QUIZ_RULES = `Alterne entre questions conceptuelles ("quelle est la différence entre X et Y", "pourquoi utiliser X plutôt que Y") et questions techniques (lire un court extrait de code en lecture seule, prédire un résultat, identifier un piège) — comme dans un vrai entretien technique.
 Chaque question doit être ENTIÈREMENT AUTONOME : si un extrait de code utilise une classe, fonction ou variable définie plus tôt dans le chapitre, sa définition complète doit être recopiée dans le champ "question" avant le code de la question — ne jamais renvoyer implicitement vers "l'exemple N" ou "la classe X du chapitre" sans le reproduire, le lecteur n'a que le texte de la question sous les yeux.
 ${ANTI_FABRICATION_RULES}`;
 
-function buildQuizSystemInstruction(mode) {
-  const base = 'Tu es un formateur qui conçoit un QCM (questionnaire à choix multiples) à partir d\'un chapitre. Réponds en français. Chaque question a exactement 4 options, une seule strictement correcte.';
-  return mode === 'interview' ? `${base}\n${INTERVIEW_QUIZ_RULES}` : `${base}\n${EXERCISE_QUIZ_RULES}`;
+function buildInterviewSystemInstruction() {
+  return `Tu es un formateur qui conçoit un QCM (questionnaire à choix multiples) de préparation à un entretien technique, à partir d'un chapitre. Réponds en français. Chaque question a exactement 4 options, une seule strictement correcte.
+${INTERVIEW_QUIZ_RULES}`;
 }
 
 // Never trust the structured output blindly: drop any question missing a
@@ -367,28 +351,128 @@ function validateQuizQuestions(questions) {
   );
 }
 
+// ── Open-ended practice exercises (mode: 'exercise') — replaces MCQ ──
+//
+// Unlike interview prep (QUIZ_SCHEMA, always MCQ), practice exercises are
+// open-ended and AI-graded (see gradeOpenExercise below) rather than
+// multiple-choice. The app hosts arbitrary non-fiction books, not just
+// programming ones, so the exercise "type" is never forced — Gemini picks it
+// per exercise based on what the chapter actually teaches (a code-heavy
+// chapter yields mostly "code" exercises, a theoretical one mostly
+// "written").
+const OPEN_EXERCISE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    questions: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          type: { type: SchemaType.STRING, description: '"code", "math" ou "written" — le format le plus adapté à ce que ce point précis du chapitre enseigne réellement' },
+          prompt: { type: SchemaType.STRING, description: 'Énoncé en français, Markdown et LaTeX ($...$/$$...$$) autorisés, entièrement autonome' },
+          language: { type: SchemaType.STRING, description: 'Langage de programmation si type="code" (ex. "python"), chaîne vide sinon' },
+          starterCode: { type: SchemaType.STRING, description: 'Squelette de départ optionnel si type="code" (peut être vide)' },
+          expectedApproach: { type: SchemaType.STRING, description: 'Note interne, jamais montrée à l\'utilisateur : ce qu\'une bonne réponse doit couvrir, ancré dans le texte fourni — sert uniquement à la correction ultérieure' },
+          hints: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: '1 à 3 indices progressifs (du plus vague au plus précis), affichés uniquement si le lecteur clique sur "Indice" — jamais la réponse elle-même. Le nombre et la précision des indices dépendent de la difficulté réelle de l\'exercice.',
+          },
+        },
+        required: ['type', 'prompt', 'expectedApproach', 'hints'],
+      },
+    },
+  },
+  required: ['questions'],
+};
+
+const OPEN_EXERCISE_RULES = `Règles strictes :
+- Pour chaque exercice, choisis le "type" le plus adapté à ce que ce point précis du chapitre enseigne réellement : "code" seulement si le chapitre présente effectivement du code à ce sujet, "math" pour un calcul ou une dérivation, "written" pour une question conceptuelle ou de conception. Ne force JAMAIS "code" sur un chapitre qui n'en contient pas — un chapitre théorique peut n'avoir que des exercices "written".
+- Mélange naturellement les types selon la densité réelle du chapitre plutôt que de viser un quota fixe par type.
+- N'utilise QUE les concepts, la syntaxe et les exemples réellement présents dans le texte fourni.
+- Chaque "prompt" doit être ENTIÈREMENT AUTONOME : si l'exercice s'appuie sur une classe, fonction, formule ou exemple présenté plus tôt dans le chapitre, il DOIT être recopié intégralement dans "prompt" — le lecteur n'a que ce texte sous les yeux, pas le reste du chapitre.
+- Pour un exercice "code" : "language" indique le langage (ex. "python"), "starterCode" peut fournir un squelette ou une signature de départ (facultatif, laisser vide si non pertinent). Les identifiants et commentaires du code restent en anglais, conformément aux conventions Python standard.
+- "expectedApproach" (jamais affiché à l'utilisateur) doit décrire concrètement ce qu'une réponse correcte doit couvrir, en citant des éléments réellement présents dans le texte fourni — jamais une connaissance générique hors du texte. C'est ce qui servira de base à la correction.
+- "hints" : adapte le nombre et la précision des indices à la difficulté réelle de l'exercice — un exercice simple peut n'avoir qu'un seul indice bref, un exercice difficile 2 à 3 indices progressifs (du plus vague au plus précis). Un indice pointe vers la bonne direction (un concept à revoir, une piste de raisonnement) mais NE DOIT JAMAIS révéler la réponse elle-même ni le code/la formule finale.
+- Formatage impératif de tout code dans "prompt"/"hints" : plusieurs instructions liées entre elles vont dans UN SEUL bloc de code fencé (\`\`\`), jamais énumérées en prose séparées par des virgules. Un identifiant ou une expression isolée cité en ligne reste entre backticks simples (\`comme_ceci\`).
+${ANTI_FABRICATION_RULES}`;
+
+function buildOpenExerciseSystemInstruction() {
+  return `Tu es un formateur qui conçoit des exercices pratiques ouverts à partir d'un chapitre — pas des QCM, l'utilisateur rédige une vraie réponse. Réponds en français.
+${OPEN_EXERCISE_RULES}`;
+}
+
+const OPEN_EXERCISE_TYPES = new Set(['code', 'math', 'written']);
+
+// Same defensive philosophy as validateQuizQuestions — never trust the
+// structured output blindly. `hints` is normalized rather than a rejection
+// criterion: a missing/malformed hints array just means the hint button
+// won't show for that exercise, not that the whole exercise is dropped.
+function validateOpenExercises(questions) {
+  return (Array.isArray(questions) ? questions : [])
+    .filter(q =>
+      q && OPEN_EXERCISE_TYPES.has(q.type) &&
+      typeof q.prompt === 'string' && q.prompt.trim().length > 0 &&
+      typeof q.expectedApproach === 'string' && q.expectedApproach.trim().length > 0
+    )
+    .map(q => ({
+      ...q,
+      hints: Array.isArray(q.hints) ? q.hints.filter(h => typeof h === 'string' && h.trim().length > 0) : [],
+    }));
+}
+
 /**
- * Generates a multiple-choice quiz (mode: 'exercise' | 'interview') for the
- * current chapter, as a single structured call. Returns a validated array
- * of questions (never throws on individual malformed questions — only on
- * missing input or a wholly empty result).
+ * Generates a quiz for the current chapter, as a single structured call.
+ * mode: 'interview' → multiple-choice (QUIZ_SCHEMA), for rehearsing quick
+ * verbal answers. mode: 'exercise' → open-ended, AI-graded exercises
+ * (OPEN_EXERCISE_SCHEMA) — the two modes now return structurally different
+ * item shapes, so they're handled as separate branches rather than forced
+ * through one shared code path. Never throws on individual malformed
+ * entries (validation drops them) — only on missing input or a wholly empty
+ * result.
  */
 export async function generateQuiz({ mode, pageText, bookTitle, bookAuthor, chapterName, signal }) {
   const genAI = getClient();
   if (!pageText || pageText.length < 30) throw new Error('NO_PAGE_TEXT');
+  const chapterLabel = chapterName || 'Chapitre';
+
+  if (mode === 'interview') {
+    const model = genAI.getGenerativeModel({
+      model: MODEL,
+      systemInstruction: buildInterviewSystemInstruction(),
+      generationConfig: {
+        temperature: 0.5,
+        maxOutputTokens: 32768,
+        responseMimeType: 'application/json',
+        responseSchema: QUIZ_SCHEMA,
+      },
+    });
+    const prompt = `Livre : "${bookTitle}" de ${bookAuthor}. Chapitre : ${chapterLabel}.
+
+Texte du chapitre :
+"""
+${pageText}
+"""
+
+Conçois un QCM de préparation à un entretien technique de 8 à 10 questions, couvrant les concepts réellement enseignés dans ce texte, du plus simple au plus avancé.`;
+
+    const result = await model.generateContent(prompt, { signal });
+    const parsed = JSON.parse(result.response.text());
+    const questions = validateQuizQuestions(parsed.questions);
+    if (questions.length === 0) throw new Error('EMPTY_QUIZ');
+    return questions;
+  }
+
   const model = genAI.getGenerativeModel({
     model: MODEL,
-    systemInstruction: buildQuizSystemInstruction(mode),
+    systemInstruction: buildOpenExerciseSystemInstruction(),
     generationConfig: {
       temperature: 0.5,
       maxOutputTokens: 32768,
       responseMimeType: 'application/json',
-      responseSchema: QUIZ_SCHEMA,
+      responseSchema: OPEN_EXERCISE_SCHEMA,
     },
   });
-
-  const chapterLabel = chapterName || 'Chapitre';
-  const kind = mode === 'interview' ? "de préparation à un entretien technique" : "d'exercices pratiques";
   const prompt = `Livre : "${bookTitle}" de ${bookAuthor}. Chapitre : ${chapterLabel}.
 
 Texte du chapitre :
@@ -396,11 +480,11 @@ Texte du chapitre :
 ${pageText}
 """
 
-Conçois un QCM ${kind} de 8 à 10 questions, couvrant les concepts réellement enseignés dans ce texte, du plus simple au plus avancé.`;
+Conçois de 8 à 10 exercices pratiques ouverts, couvrant les concepts réellement enseignés dans ce texte, du plus simple au plus avancé.`;
 
   const result = await model.generateContent(prompt, { signal });
   const parsed = JSON.parse(result.response.text());
-  const questions = validateQuizQuestions(parsed.questions);
+  const questions = validateOpenExercises(parsed.questions);
   if (questions.length === 0) throw new Error('EMPTY_QUIZ');
   return questions;
 }
@@ -419,14 +503,16 @@ function capSessionText(pageText) {
   return pageText.slice(pageText.length - SESSION_TEXT_CHAR_CAP);
 }
 
-const SESSION_QUIZ_SYSTEM_INSTRUCTION = `Tu es un formateur qui conçoit un très court QCM (questionnaire à choix multiples) à partir des pages qu'un lecteur vient de lire pendant une session de 25 minutes — ce texte peut couvrir la fin d'un chapitre et le début du suivant. Réponds en français. Chaque question a exactement 4 options, une seule strictement correcte.
-${EXERCISE_QUIZ_RULES}`;
+const SESSION_QUIZ_SYSTEM_INSTRUCTION = `Tu es un formateur qui conçoit de très courts exercices pratiques ouverts à partir des pages qu'un lecteur vient de lire pendant une session de 25 minutes — ce texte peut couvrir la fin d'un chapitre et le début du suivant. Réponds en français.
+${OPEN_EXERCISE_RULES}`;
 
 /**
- * Generates 2-3 short practice exercises grounded in the text read during one
- * Pomodoro reading cycle. Deliberately not cached anywhere (unlike
- * generateQuiz) — each cycle asks a fresh question, and nothing is persisted
- * until the whole cycle is scored (see pomodoroLog.js).
+ * Generates 2-3 short open-ended practice exercises grounded in the text
+ * read during one Pomodoro reading cycle. Always exercise-flavored (there is
+ * no interview-prep equivalent for Pomodoro sessions). Deliberately not
+ * cached anywhere (unlike generateQuiz) — each cycle asks fresh exercises,
+ * and nothing is persisted until the whole cycle is scored (see
+ * pomodoroLog.js).
  */
 export async function generateSessionExercises({ pageText, bookTitle, bookAuthor, chapterName, signal }) {
   const genAI = getClient();
@@ -438,7 +524,7 @@ export async function generateSessionExercises({ pageText, bookTitle, bookAuthor
       temperature: 0.5,
       maxOutputTokens: 6144,
       responseMimeType: 'application/json',
-      responseSchema: QUIZ_SCHEMA,
+      responseSchema: OPEN_EXERCISE_SCHEMA,
     },
   });
 
@@ -449,13 +535,91 @@ Texte lu pendant cette session de lecture :
 ${capSessionText(pageText)}
 """
 
-Conçois un QCM de 2 à 3 questions courtes, uniquement sur ce qui vient d'être lu.`;
+Conçois 2 à 3 exercices pratiques ouverts et courts, uniquement sur ce qui vient d'être lu.`;
 
   const result = await model.generateContent(prompt, { signal });
   const parsed = JSON.parse(result.response.text());
-  const questions = validateQuizQuestions(parsed.questions);
+  const questions = validateOpenExercises(parsed.questions);
   if (questions.length === 0) throw new Error('EMPTY_QUIZ');
   return questions;
+}
+
+// ── Grading a submitted answer to one open exercise ──
+//
+// Called once per submitted answer (never pre-computed at generation time).
+// Grades against `exercise.expectedApproach` and the original chapter text,
+// not generic outside knowledge — same grounding discipline as generation.
+
+const GRADING_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    verdict: { type: SchemaType.STRING, description: '"correct", "partial" ou "incorrect"' },
+    feedback: { type: SchemaType.STRING, description: 'Retour en français, doit citer un élément concret du chapitre pour justifier le verdict. Tout identifiant, expression ou instruction de code DOIT être formaté en Markdown : bloc de code fencé (```) pour toute séquence de plusieurs instructions liées, backticks simples (`) pour un identifiant ou une expression isolée cité en ligne. Formules mathématiques en LaTeX ($...$/$$...$$).' },
+  },
+  required: ['verdict', 'feedback'],
+};
+
+const GRADING_RULES = `Tu corriges la réponse d'un lecteur à un exercice pratique, à partir du texte du chapitre et de la piste attendue pour une bonne réponse.
+Règles strictes :
+- "verdict" vaut "correct" si la réponse couvre l'essentiel de la piste attendue, "partial" si elle va dans la bonne direction mais reste incomplète, imprécise ou partiellement fausse, "incorrect" si elle passe à côté du concept ou contient une erreur de fond.
+- N'exige JAMAIS un point absent de la piste attendue — juge uniquement par rapport à ce qui y est décrit, pas par rapport à une connaissance générale plus large.
+- "feedback" doit être constructif : dire ce qui est juste, ce qui manque ou est faux, et citer un élément concret du texte du chapitre pour appuyer le verdict — jamais un jugement générique déconnecté du chapitre.
+- Reste bref et direct : quelques phrases suffisent, ce n'est pas une nouvelle leçon complète.
+- Formatage impératif de tout code dans "feedback" : si tu cites plusieurs instructions liées entre elles (ex. une suite d'affectations ou d'appels qui forment un raisonnement), regroupe-les dans UN SEUL bloc de code fencé (\`\`\`) avec des retours à la ligne entre chaque instruction — jamais une suite d'instructions séparées par des virgules dans une phrase en prose. Un identifiant ou une expression isolée cité en ligne dans une phrase reste entre backticks simples (\`comme_ceci\`). N'écris jamais de code brut sans formatage Markdown.
+${ANTI_FABRICATION_RULES}`;
+
+const GRADING_VERDICTS = new Set(['correct', 'partial', 'incorrect']);
+
+// Stricter than validateQuizQuestions/validateOpenExercises, which silently
+// filter out malformed entries — a grading result is displayed and scored
+// as-is, so a malformed one must fail loudly rather than be coerced.
+function validateGrading(parsed) {
+  if (!parsed || !GRADING_VERDICTS.has(parsed.verdict) || typeof parsed.feedback !== 'string' || !parsed.feedback.trim()) {
+    throw new Error('INVALID_GRADING');
+  }
+  return { verdict: parsed.verdict, feedback: parsed.feedback };
+}
+
+export async function gradeOpenExercise({ exercise, pageText, userAnswer, bookTitle, bookAuthor, chapterName, signal }) {
+  const genAI = getClient();
+  const model = genAI.getGenerativeModel({
+    model: MODEL,
+    systemInstruction: GRADING_RULES,
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 2048,
+      responseMimeType: 'application/json',
+      responseSchema: GRADING_SCHEMA,
+    },
+  });
+
+  const prompt = `Livre : "${bookTitle}" de ${bookAuthor}. Chapitre : ${chapterName || 'inconnu'}.
+
+Texte du chapitre (contexte) :
+"""
+${capSessionText(pageText)}
+"""
+
+Exercice posé (type : ${exercise?.type}) :
+"""
+${exercise?.prompt}
+"""
+
+Piste attendue pour une bonne réponse (usage interne, ne pas la citer littéralement dans le feedback) :
+"""
+${exercise?.expectedApproach}
+"""
+
+Réponse soumise par le lecteur :
+"""
+${userAnswer}
+"""
+
+Corrige cette réponse.`;
+
+  const result = await model.generateContent(prompt, { signal });
+  const parsed = JSON.parse(result.response.text());
+  return validateGrading(parsed);
 }
 
 // ── Whole-book translation (structured batch calls, one per chapter) ──

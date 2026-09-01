@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import { generateQuiz } from '../lib/geminiApi.js';
 import { getQuizProgress, saveQuizQuestions, saveQuizAttempt } from '../lib/quizProgress.js';
+import OpenExercisePlayer from './OpenExercisePlayer.jsx';
 import styles from './QuizModal.module.css';
 
 const markdownComponents = {
@@ -146,7 +147,7 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
 
           {phase === 'start' && (
             <div className={styles.centerState}>
-              <p className={styles.quizTitle}>{questions.length} questions</p>
+              <p className={styles.quizTitle}>{questions.length} {mode === 'interview' ? 'questions' : 'exercices'}</p>
               {progressEntry?.attempts > 0 && (
                 <p className={styles.bestScore}>
                   Déjà complété — meilleur score {progressEntry.bestScore}/{progressEntry.total}
@@ -163,7 +164,7 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
             </div>
           )}
 
-          {phase === 'playing' && questions[current] && (
+          {phase === 'playing' && mode === 'interview' && questions[current] && (
             <div className={styles.playing}>
               <div className={styles.progressRow}>
                 <div className={styles.progressTrack}>
@@ -211,6 +212,17 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
                 </button>
               )}
             </div>
+          )}
+
+          {phase === 'playing' && mode === 'exercise' && (
+            <OpenExercisePlayer
+              exercises={questions}
+              pageText={pageText}
+              bookTitle={bookTitle}
+              bookAuthor={bookAuthor}
+              chapterName={chapterName}
+              onAllGraded={finish}
+            />
           )}
 
           {phase === 'summary' && (
