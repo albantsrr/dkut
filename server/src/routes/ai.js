@@ -4,12 +4,23 @@ import * as gemini from '../gemini.js';
 
 const router = Router();
 
-// Ties an AbortController to the request's own lifecycle so an in-flight
+// Ties an AbortController to the *response's* lifecycle so an in-flight
 // Gemini call is actually cancelled server-side when the client disconnects
 // (tab closed, explicit stop, navigation away) — not just abandoned.
-function abortOnClose(req) {
+//
+// Deliberately listens on `res`, not `req`: req's 'close' event fires as
+// soon as the request body has been fully read (for a small JSON payload,
+// almost immediately, well before the response is even started) — using it
+// here aborted every Gemini call within milliseconds of the route handler
+// starting, regardless of whether the client was still connected. res's
+// 'close' only fires once the underlying connection actually goes away, and
+// checking writableEnded skips the (expected) close that follows a normal
+// res.end() — only a genuine early disconnect leaves writableEnded false.
+function abortOnClose(res) {
   const controller = new AbortController();
-  req.on('close', () => controller.abort());
+  res.on('close', () => {
+    if (!res.writableEnded) controller.abort();
+  });
   return controller.signal;
 }
 
@@ -19,7 +30,7 @@ function errorStatus(message) {
 
 router.post('/ai/chat', requireAuth, async (req, res) => {
   const { userMessage, pageText, bookTitle, bookAuthor, chapterName, history } = req.body ?? {};
-  const signal = abortOnClose(req);
+  const signal = abortOnClose(res);
 
   let started = false;
   try {
@@ -57,7 +68,7 @@ router.post('/ai/revision-sheet', requireAuth, async (req, res) => {
 // failed card in a revision-set can be retried without re-running the plan.
 router.post('/ai/revision-sheet-concept', requireAuth, async (req, res) => {
   const { pageText, bookTitle, bookAuthor, chapterName, sheet } = req.body ?? {};
-  const signal = abortOnClose(req);
+  const signal = abortOnClose(res);
   try {
     const text = await gemini.generateSheetForConcept({ pageText, bookTitle, bookAuthor, chapterName, sheet, signal });
     res.json({ text });
@@ -73,7 +84,7 @@ router.post('/ai/revision-sheet-concept', requireAuth, async (req, res) => {
 // the frontend for the consumer that turns this back into an async generator.
 router.post('/ai/revision-set', requireAuth, async (req, res) => {
   const { pageText, bookTitle, bookAuthor, chapterName } = req.body ?? {};
-  const signal = abortOnClose(req);
+  const signal = abortOnClose(res);
 
   let started = false;
   try {
@@ -95,7 +106,7 @@ router.post('/ai/revision-set', requireAuth, async (req, res) => {
 
 router.post('/ai/quiz', requireAuth, async (req, res) => {
   const { mode, pageText, bookTitle, bookAuthor, chapterName } = req.body ?? {};
-  const signal = abortOnClose(req);
+  const signal = abortOnClose(res);
   try {
     const questions = await gemini.generateQuiz({ mode, pageText, bookTitle, bookAuthor, chapterName, signal });
     res.json({ questions });
@@ -108,7 +119,7 @@ router.post('/ai/quiz', requireAuth, async (req, res) => {
 
 router.post('/ai/session-exercises', requireAuth, async (req, res) => {
   const { pageText, bookTitle, bookAuthor, chapterName } = req.body ?? {};
-  const signal = abortOnClose(req);
+  const signal = abortOnClose(res);
   try {
     const questions = await gemini.generateSessionExercises({ pageText, bookTitle, bookAuthor, chapterName, signal });
     res.json({ questions });
@@ -121,7 +132,7 @@ router.post('/ai/session-exercises', requireAuth, async (req, res) => {
 
 router.post('/ai/translate-segments', requireAuth, async (req, res) => {
   const { segments, targetLangLabel } = req.body ?? {};
-  const signal = abortOnClose(req);
+  const signal = abortOnClose(res);
   try {
     const translations = await gemini.translateSegments({ segments, targetLangLabel, signal });
     res.json({ translations });
