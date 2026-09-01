@@ -83,7 +83,6 @@ export default function TranslateBookModal({ book, allBooks, onClose, onTranslat
   }, [book, targetLang, onTranslated]);
 
   const handleStart = useCallback(async () => {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     setPhase('translating');
     setError(null);
     setChapterStatus([]);
@@ -95,7 +94,7 @@ export default function TranslateBookModal({ book, allBooks, onClose, onTranslat
 
     try {
       for await (const event of translateEpub({
-        apiKey, arrayBuffer: bookDataRef.current, targetLang, signal: controller.signal,
+        arrayBuffer: bookDataRef.current, targetLang, signal: controller.signal,
       })) {
         switch (event.type) {
           case 'plan':

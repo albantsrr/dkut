@@ -1,24 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
-import { generateQuiz } from '../lib/geminiApi.js';
-import { getQuizProgress, saveQuizQuestions, saveQuizAttempt } from '../lib/quizProgress.js';
-import styles from './QuizModal.module.css';
+import { generateSessionExercises } from '../lib/geminiApi.js';
+import { recordCompletedCycle } from '../lib/pomodoroLog.js';
+import styles from './PomodoroModal.module.css';
+
+const BREAK_MINUTES = 5;
 
 const markdownComponents = {
   p: ({ node, ...props }) => <p className={styles.mdP} {...props} />,
-  // react-markdown v8+ no longer passes an `inline` prop to `code` — block
-  // vs inline is instead distinguished purely in CSS via the `.mdPre .mdCode`
-  // descendant selector below. `className` must come after `styles.mdCode`
-  // (not before) so rehype's `language-xxx` class (set on fenced code with a
-  // language tag) doesn't silently overwrite ours.
   code: ({ node, className, ...props }) => (
     <code className={[styles.mdCode, className].filter(Boolean).join(' ')} {...props} />
   ),
   pre: ({ node, ...props }) => <pre className={styles.mdPre} {...props} />,
 };
 
-const MODE_LABELS = { exercise: 'Exercices', interview: "Préparation d'entretien" };
+function formatClock(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 function scoreMessage(score, total) {
   if (total === 0) return '';
@@ -29,63 +30,61 @@ function scoreMessage(score, total) {
 }
 
 /**
- * Full-screen QCM player, mounted from Reader.jsx. Loads a cached quiz for
- * (bookId, chapterHref, mode) if one exists, otherwise generates one via
- * Gemini and caches it immediately (before the user finishes playing).
+ * End-of-cycle modal for the Pomodoro learning mode, mounted from Reader.jsx.
+ * Generates 2-3 exercises from the text read during the cycle that just
+ * ended, plays them out, records the completed cycle, then runs an optional
+ * skippable break before handing control back via onCycleFinished — which
+ * both closes this modal and starts the next 25-minute cycle. There is no
+ * onClose/dismiss affordance during generation or play: the exercises are
+ * mandatory once triggered (only the break can be skipped), so leaving the
+ * Reader entirely is the only way out of an active cycle — consistent with
+ * an interrupted cycle never being counted (see pomodoroLog.js).
  */
-export default function QuizModal({ mode, bookId, chapterHref, chapterName, bookTitle, bookAuthor, pageText, onClose }) {
-  const [phase, setPhase] = useState('loading'); // loading | start | playing | summary | error
+export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinutes, chapters, onCycleFinished }) {
+  const [phase, setPhase] = useState('generating'); // generating | playing | summary | break | error
   const [questions, setQuestions] = useState([]);
-  const [progressEntry, setProgressEntry] = useState(null);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [score, setScore] = useState(0);
   const [error, setError] = useState(null);
+  const [breakSecondsLeft, setBreakSecondsLeft] = useState(BREAK_MINUTES * 60);
   const abortRef = useRef(null);
+  const breakTimerRef = useRef(null);
+  const breakEndAtRef = useRef(null);
 
-  const load = useCallback(async (forceRegenerate) => {
-    setPhase('loading');
+  const chapterName = chapters.map(c => c.label).filter(Boolean).join(' → ');
+  const pageText = chapters.map(c => c.text).filter(Boolean).join('\n\n---\n\n');
+
+  const load = useCallback(async () => {
+    setPhase('generating');
     setError(null);
     try {
-      const cached = !forceRegenerate ? await getQuizProgress(bookId, chapterHref, mode) : null;
-      if (cached?.questions?.length) {
-        setQuestions(cached.questions);
-        setProgressEntry(cached);
-        setPhase('start');
-        return;
-      }
       const controller = new AbortController();
       abortRef.current = controller;
-      const generated = await generateQuiz({
-        mode, pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
+      const generated = await generateSessionExercises({
+        pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
       });
-      await saveQuizQuestions(bookId, chapterHref, mode, generated);
-      const fresh = await getQuizProgress(bookId, chapterHref, mode);
       setQuestions(generated);
-      setProgressEntry(fresh);
-      setPhase('start');
+      setCurrent(0);
+      setSelected(null);
+      setAnswered(false);
+      setScore(0);
+      setPhase('playing');
     } catch (err) {
       if (err.name === 'AbortError') return;
-      console.error('[QuizModal] generation error:', err);
+      console.error('[PomodoroModal] generation error:', err);
       setError(err.message === 'NO_API_KEY' ? 'NO_API_KEY' : err.message || 'NETWORK');
       setPhase('error');
     }
-  }, [bookId, chapterHref, mode, bookTitle, bookAuthor, chapterName, pageText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
-    load(false);
+    load();
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookId, chapterHref, mode]);
-
-  const startPlaying = () => {
-    setCurrent(0);
-    setSelected(null);
-    setAnswered(false);
-    setScore(0);
-    setPhase('playing');
-  };
+  }, []);
 
   const selectOption = (i) => {
     if (answered) return;
@@ -96,11 +95,12 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
 
   const finish = useCallback((finalScore) => {
     setPhase('summary');
-    saveQuizAttempt(bookId, chapterHref, mode, { score: finalScore, total: questions.length })
-      .then(() => getQuizProgress(bookId, chapterHref, mode))
-      .then(setProgressEntry)
-      .catch(err => console.error('[QuizModal] save attempt error:', err));
-  }, [bookId, chapterHref, mode, questions.length]);
+    recordCompletedCycle(bookId, {
+      durationMinutes: cycleMinutes,
+      exercisesAnswered: questions.length,
+      exercisesCorrect: finalScore,
+    }).catch(err => console.error('[PomodoroModal] record cycle error:', err));
+  }, [bookId, cycleMinutes, questions.length]);
 
   const nextQuestion = () => {
     const isLast = current + 1 >= questions.length;
@@ -113,21 +113,36 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
     setAnswered(false);
   };
 
+  const startBreak = useCallback(() => {
+    breakEndAtRef.current = Date.now() + BREAK_MINUTES * 60_000;
+    setBreakSecondsLeft(BREAK_MINUTES * 60);
+    setPhase('break');
+    clearInterval(breakTimerRef.current);
+    breakTimerRef.current = setInterval(() => {
+      const remaining = breakEndAtRef.current - Date.now();
+      if (remaining <= 0) {
+        clearInterval(breakTimerRef.current);
+        onCycleFinished();
+      } else {
+        setBreakSecondsLeft(Math.ceil(remaining / 1000));
+      }
+    }, 1000);
+  }, [onCycleFinished]);
+
+  useEffect(() => () => clearInterval(breakTimerRef.current), []);
+
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={e => e.stopPropagation()}>
+    <div className={styles.overlay}>
+      <div className={styles.modal}>
         <div className={styles.header}>
-          <span className={styles.headerLabel}>
-            {MODE_LABELS[mode]} — {chapterName || bookTitle}
-          </span>
-          <button className={styles.closeBtn} onClick={onClose}>✕</button>
+          <span className={styles.headerLabel}>Session Pomodoro — {chapterName || bookTitle}</span>
         </div>
 
         <div className={styles.body}>
-          {phase === 'loading' && (
+          {phase === 'generating' && (
             <div className={styles.centerState}>
               <span className={styles.loadingDot} />
-              <p className={styles.stateText}>Génération du quiz…</p>
+              <p className={styles.stateText}>Génération des exercices…</p>
             </div>
           )}
 
@@ -137,29 +152,10 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
                 {error === 'NO_API_KEY'
                   ? 'Clé API Gemini manquante côté serveur (GEMINI_API_KEY).'
                   : error === 'NO_PAGE_TEXT'
-                  ? 'Pas assez de texte sur cette page pour générer un quiz.'
+                  ? "Pas assez de texte lu pendant cette session pour générer des exercices."
                   : `Erreur : ${error}`}
               </p>
-              <button className={styles.primaryBtn} onClick={() => load(false)}>Réessayer</button>
-            </div>
-          )}
-
-          {phase === 'start' && (
-            <div className={styles.centerState}>
-              <p className={styles.quizTitle}>{questions.length} questions</p>
-              {progressEntry?.attempts > 0 && (
-                <p className={styles.bestScore}>
-                  Déjà complété — meilleur score {progressEntry.bestScore}/{progressEntry.total}
-                </p>
-              )}
-              <div className={styles.startActions}>
-                <button className={styles.primaryBtn} onClick={startPlaying}>
-                  {progressEntry?.attempts > 0 ? 'Rejouer' : 'Commencer'}
-                </button>
-                <button className={styles.secondaryBtn} onClick={() => load(true)}>
-                  Régénérer
-                </button>
-              </div>
+              <button className={styles.primaryBtn} onClick={load}>Réessayer</button>
             </div>
           )}
 
@@ -217,10 +213,15 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
             <div className={styles.centerState}>
               <p className={styles.scoreBig}>{score}/{questions.length}</p>
               <p className={styles.scoreMessage}>{scoreMessage(score, questions.length)}</p>
-              <div className={styles.startActions}>
-                <button className={styles.primaryBtn} onClick={startPlaying}>Rejouer</button>
-                <button className={styles.secondaryBtn} onClick={onClose}>Fermer</button>
-              </div>
+              <button className={styles.primaryBtn} onClick={startBreak}>Continuer</button>
+            </div>
+          )}
+
+          {phase === 'break' && (
+            <div className={styles.centerState}>
+              <p className={styles.breakLabel}>Pause</p>
+              <p className={styles.breakClock}>{formatClock(breakSecondsLeft)}</p>
+              <button className={styles.secondaryBtn} onClick={onCycleFinished}>Passer la pause</button>
             </div>
           )}
         </div>

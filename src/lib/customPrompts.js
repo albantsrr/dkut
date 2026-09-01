@@ -1,4 +1,4 @@
-import { loadData, saveData } from './driveStorage.js';
+import { apiGet, apiPutJson, apiDelete } from './api.js';
 
 const DEFAULT_PROMPTS = [
   { id: 'default-revision-sheet', title: 'Create a revision sheet', text: 'Create a revision sheet', type: 'revision-sheet' },
@@ -10,8 +10,7 @@ const DEFAULT_PROMPTS = [
 
 // Ids of defaults that used to exist (free-text exercises/interview prep,
 // replaced by the QCM quiz reachable from the Reader toolbar — see
-// QuizModal.jsx). ensurePrompts() only backfills missing ids, it never
-// removes a stale one on its own, so these are dropped explicitly on load.
+// QuizModal.jsx).
 const RETIRED_DEFAULT_IDS = ['default-interview-prep', 'default-learning-package'];
 
 // In-memory mirror, mirrors the pattern in progress.js. Writes here are
@@ -20,41 +19,30 @@ let _prompts = null;
 // Default-prompt ids the user deliberately deleted — without this, deleting
 // a default prompt never "sticks": the next ensurePrompts() backfill would
 // see its id missing from customPrompts and re-seed it, indistinguishable
-// from a default introduced after the user's data file was created.
+// from a default introduced after the user's account was created.
 let _deletedDefaultIds = null;
 
 async function ensurePrompts() {
   if (_prompts) return;
-  const data = await loadData();
-  _deletedDefaultIds = new Set(data.deletedDefaultPromptIds || []);
-  if (data.customPrompts) {
-    // Merge in any DEFAULT_PROMPTS added after this user's data file already
-    // existed (matched by id) — otherwise a newly introduced default prompt
-    // would never appear for existing users, since only a missing
-    // `customPrompts` triggers the full-seed branch below.
-    const existingIds = new Set(data.customPrompts.map(p => p.id));
-    const missingDefaults = DEFAULT_PROMPTS.filter(p => !existingIds.has(p.id) && !_deletedDefaultIds.has(p.id));
-    const withoutRetired = data.customPrompts.filter(p => !RETIRED_DEFAULT_IDS.includes(p.id));
-    const changed = missingDefaults.length > 0 || withoutRetired.length !== data.customPrompts.length;
-    _prompts = changed ? [...withoutRetired, ...missingDefaults] : data.customPrompts;
-    if (changed) {
-      data.customPrompts = _prompts;
-      await saveData(data);
-    }
-  } else {
-    // First load on a Drive data file created before this feature existed —
-    // seed with today's defaults and persist once so they become editable.
-    _prompts = DEFAULT_PROMPTS.filter(p => !_deletedDefaultIds.has(p.id));
-    data.customPrompts = _prompts;
-    await saveData(data);
-  }
-}
+  const { prompts, deletedDefaultIds } = await apiGet('/prompts');
+  _deletedDefaultIds = new Set(deletedDefaultIds || []);
 
-async function persistPrompts() {
-  const data = await loadData();
-  data.customPrompts = _prompts;
-  data.deletedDefaultPromptIds = Array.from(_deletedDefaultIds || []);
-  await saveData(data);
+  const existingIds = new Set(prompts.map(p => p.id));
+  const missingDefaults = DEFAULT_PROMPTS.filter(p => !existingIds.has(p.id) && !_deletedDefaultIds.has(p.id));
+  const retiredPresent = prompts.filter(p => RETIRED_DEFAULT_IDS.includes(p.id));
+  const withoutRetired = prompts.filter(p => !RETIRED_DEFAULT_IDS.includes(p.id));
+
+  _prompts = [...withoutRetired, ...missingDefaults];
+
+  // Backfill any default added after this user's account already existed
+  // (matched by id) — a brand new account has an empty `prompts` array, so
+  // this same path also seeds all of DEFAULT_PROMPTS on first load.
+  await Promise.all(missingDefaults.map(p =>
+    apiPutJson(`/prompts/${p.id}`, { title: p.title, text: p.text, type: p.type })
+  ));
+  // Actively drop any retired default still sitting in storage from before
+  // the Quiz feature replaced it.
+  await Promise.all(retiredPresent.map(p => apiDelete(`/prompts/${p.id}`)));
 }
 
 export async function getAllPrompts() {
@@ -65,21 +53,20 @@ export async function getAllPrompts() {
 // Adds a new prompt, or replaces an existing one by id.
 export async function savePrompt(prompt) {
   await ensurePrompts();
+  await apiPutJson(`/prompts/${prompt.id}`, { title: prompt.title, text: prompt.text, type: prompt.type });
   const idx = _prompts.findIndex(p => p.id === prompt.id);
   _prompts = idx >= 0
     ? _prompts.map((p, i) => (i === idx ? prompt : p))
     : [..._prompts, prompt];
-  await persistPrompts();
   return _prompts;
 }
 
 export async function deletePrompt(id) {
   await ensurePrompts();
+  const isDefault = DEFAULT_PROMPTS.some(p => p.id === id);
+  await apiDelete(`/prompts/${id}${isDefault ? '?markDeletedDefault=true' : ''}`);
   _prompts = _prompts.filter(p => p.id !== id);
-  if (DEFAULT_PROMPTS.some(p => p.id === id)) {
-    _deletedDefaultIds.add(id);
-  }
-  await persistPrompts();
+  if (isDefault) _deletedDefaultIds.add(id);
   return _prompts;
 }
 

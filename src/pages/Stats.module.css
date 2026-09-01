@@ -1,0 +1,191 @@
+.page {
+  min-height: 100vh;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 2rem 6rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.header {
+  position: relative;
+  text-align: center;
+  padding: 4rem 0 2.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.backLink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: none;
+  border: 1px solid var(--border-gold);
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.2s ease;
+}
+
+.backLink:hover {
+  background: var(--gold-faint);
+}
+
+.ornament {
+  font-size: 0.8rem;
+  color: var(--gold);
+  letter-spacing: 0.5em;
+  margin-bottom: 0.25rem;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  letter-spacing: 0.1em;
+  color: var(--gold-light);
+  line-height: 1;
+}
+
+.subtitle {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.emptyHint {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin-top: 2rem;
+  text-align: center;
+}
+
+.errorHint {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85rem;
+  color: #e07070;
+  background: #2a1515;
+  border: 1px solid #5a2020;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-top: 2rem;
+  text-align: center;
+}
+
+/* ── Global tiles ── */
+.tiles {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1rem;
+  margin-bottom: 3rem;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 1.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+}
+
+.tileValue {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  color: var(--gold-light);
+}
+
+.tileLabel {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* ── Per-book list ── */
+.bookList {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.bookRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.bookRow:hover {
+  border-color: var(--border-gold);
+  background: var(--bg-card-hover);
+}
+
+.bookMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.bookTitle {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bookAuthor {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.bookStats {
+  display: flex;
+  gap: 1rem;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  color: var(--gold-dim);
+  white-space: nowrap;
+}
+
+.footer {
+  margin-top: 5rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.footerOrnament {
+  letter-spacing: 0.3em;
+}

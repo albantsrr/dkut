@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Epub from 'epubjs';
-import { getAllBooks, saveBook, deleteBook, syncLibrary } from '../utils/storage.js';
+import { getAllBooks, saveBook, deleteBook } from '../utils/storage.js';
 import { getAllProgress, clearProgress } from '../lib/progress.js';
-import { DriveAuthError } from '../lib/driveApi.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TranslateBookModal from '../components/TranslateBookModal.jsx';
+import ReadingModeModal from '../components/ReadingModeModal.jsx';
+import ImportFromDriveModal from '../components/ImportFromDriveModal.jsx';
 import styles from './Library.module.css';
 
 const SPINE_COLORS = [
@@ -65,8 +66,9 @@ export default function Library() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [fetchError, setFetchError] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [translatingBook, setTranslatingBook] = useState(null);
+  const [choosingBook, setChoosingBook] = useState(null);
+  const [importingFromDrive, setImportingFromDrive] = useState(false);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
@@ -76,15 +78,10 @@ export default function Library() {
     Promise.all([getAllBooks(), getAllProgress().catch(() => ({}))])
       .then(([b, p]) => { setBooks(b); setProgressMap(p); })
       .catch((err) => {
-        if (err instanceof DriveAuthError) {
-          // Token lacks Drive scope — sign out silently; ProtectedRoute redirects to /auth
-          signOut();
-          return;
-        }
-        setFetchError(err.message ?? 'Failed to load books from Drive.');
+        setFetchError(err.message ?? 'Failed to load books.');
       })
       .finally(() => setInitialLoading(false));
-  }, [signOut]);
+  }, []);
 
   const processFiles = useCallback(async (files) => {
     const epubs = Array.from(files).filter(f => f.name.endsWith('.epub'));
@@ -135,26 +132,17 @@ export default function Library() {
     }
   };
 
-  const handleSync = useCallback(async () => {
-    setSyncing(true);
-    try {
-      const added = await syncLibrary();
-      const [b, p] = await Promise.all([getAllBooks(), getAllProgress().catch(() => ({}))]);
-      setBooks(b);
-      setProgressMap(p);
-      if (added === 0) alert('Already up to date — no new books found in Drive.');
-    } catch (err) {
-      alert(`Sync failed: ${err.message}`);
-    } finally {
-      setSyncing(false);
-    }
-  }, []);
-
-  const handleRestart = (e, id) => {
+  const handleRestart = (e, book) => {
     e.stopPropagation();
-    clearProgress(id).catch(console.error);
-    setProgressMap((prev) => { const next = { ...prev }; delete next[id]; return next; });
-    navigate(`/read/${id}`);
+    clearProgress(book.id).catch(console.error);
+    setProgressMap((prev) => { const next = { ...prev }; delete next[book.id]; return next; });
+    setChoosingBook(book);
+  };
+
+  const handleChooseMode = (mode) => {
+    const book = choosingBook;
+    setChoosingBook(null);
+    navigate(`/read/${book.id}`, { state: { mode } });
   };
 
   const handleTranslateClick = (e, book) => {
@@ -164,6 +152,12 @@ export default function Library() {
 
   const handleTranslated = useCallback(() => {
     getAllBooks().then(setBooks).catch(() => {});
+  }, []);
+
+  const handleImported = useCallback(() => {
+    Promise.all([getAllBooks(), getAllProgress().catch(() => ({}))])
+      .then(([b, p]) => { setBooks(b); setProgressMap(p); })
+      .catch(() => {});
   }, []);
 
   return (
@@ -183,8 +177,11 @@ export default function Library() {
             <img src={user.picture} alt={user.name} className={styles.avatar} referrerPolicy="no-referrer" />
           )}
           <span className={styles.userEmail}>{user?.email}</span>
-          <button className={styles.syncBtn} onClick={handleSync} disabled={syncing} title="Scan Drive for unregistered EPUBs">
-            {syncing ? 'Syncing…' : '↻ Sync Drive'}
+          <button className={styles.syncBtn} onClick={() => navigate('/stats')} title="Statistiques d'apprentissage">
+            Stats
+          </button>
+          <button className={styles.syncBtn} onClick={() => setImportingFromDrive(true)} title="Importer les anciennes données Google Drive">
+            Importer depuis Drive
           </button>
           <button className={styles.signOutBtn} onClick={signOut}>Sign out</button>
         </div>
@@ -273,9 +270,9 @@ export default function Library() {
                   <article
                     key={book.id}
                     className={styles.bookCard}
-                    onClick={() => navigate(`/read/${book.id}`)}
+                    onClick={() => setChoosingBook(book)}
                     tabIndex={0}
-                    onKeyDown={(e) => e.key === 'Enter' && navigate(`/read/${book.id}`)}
+                    onKeyDown={(e) => e.key === 'Enter' && setChoosingBook(book)}
                     role="button"
                     aria-label={`Read ${book.title}`}
                   >
@@ -311,7 +308,7 @@ export default function Library() {
                             </span>
                             <button
                               className={styles.restartBtn}
-                              onClick={(e) => handleRestart(e, book.id)}
+                              onClick={(e) => handleRestart(e, book)}
                             >
                               ↺ From beginning
                             </button>
@@ -360,12 +357,12 @@ export default function Library() {
 
       {fetchError && (
         <p className={styles.errorHint}>
-          Drive error: {fetchError}
+          Error: {fetchError}
         </p>
       )}
 
       {initialLoading && (
-        <p className={styles.emptyHint}>Loading from Drive…</p>
+        <p className={styles.emptyHint}>Loading your library…</p>
       )}
 
       {!initialLoading && !fetchError && books.length === 0 && !loading && (
@@ -384,6 +381,21 @@ export default function Library() {
           allBooks={books}
           onClose={() => setTranslatingBook(null)}
           onTranslated={handleTranslated}
+        />
+      )}
+
+      {choosingBook && (
+        <ReadingModeModal
+          book={choosingBook}
+          onChoose={handleChooseMode}
+          onClose={() => setChoosingBook(null)}
+        />
+      )}
+
+      {importingFromDrive && (
+        <ImportFromDriveModal
+          onClose={() => setImportingFromDrive(false)}
+          onImported={handleImported}
         />
       )}
     </div>

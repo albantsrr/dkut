@@ -1,8 +1,11 @@
-// Local IndexedDB cache for EPUB ArrayBuffers and cover base64 strings.
-// Keys: epub-{driveId}, cover-{driveId}
+// Local IndexedDB cache for EPUB ArrayBuffers. Key: epub-{bookId}.
 // NOTE: IDB returns a structured-clone copy of the stored ArrayBuffer on each
 // get(), so the cache entry is never consumed even if epubjs transfers the
 // returned buffer. Callers must still .slice(0) before passing to epubjs.
+// Covers are no longer cached here — the backend persists them server-side
+// (books.cover_path) and returns them inline with book metadata.
+// evictBook() still clears any leftover cover-{id} entry from before this
+// change, so old cache rows don't linger forever.
 
 const DB_NAME    = 'bibliotheque-cache';
 const DB_VERSION = 1;
@@ -55,15 +58,6 @@ export async function cacheEpub(id, arrayBuffer) {
 
 export async function getCachedEpub(id) {
   const record = await idbGet(`epub-${id}`);
-  return record?.data ?? null;
-}
-
-export async function cacheCover(id, base64) {
-  await idbPut({ key: `cover-${id}`, data: base64, cachedAt: Date.now() });
-}
-
-export async function getCachedCover(id) {
-  const record = await idbGet(`cover-${id}`);
   return record?.data ?? null;
 }
 

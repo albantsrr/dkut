@@ -87,6 +87,21 @@
   text-align: center;
 }
 
+.pomodoroPill {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  opacity: 0.8;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .topActions {
   display: flex;
   align-items: center;

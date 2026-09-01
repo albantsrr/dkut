@@ -80,6 +80,13 @@ export async function getLibraryFolderId() {
   return ensureLibraryFolder();
 }
 
+// Returns the revision-sheet subfolder ID — used by ImportFromDriveModal.jsx
+// to list existing notes when migrating off Drive (see MIGRATION_PLAN.md
+// phase 5).
+export async function getNotesheetFolderId() {
+  return ensureNotesheetFolder();
+}
+
 // Saves a revision sheet markdown file to dkut/notesheet/
 export async function saveNotesheet(title, markdownContent) {
   const folderId = await ensureNotesheetFolder();

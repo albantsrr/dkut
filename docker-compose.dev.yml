@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bibliotheque
+      POSTGRES_PASSWORD: bibliotheque
+      POSTGRES_DB: bibliotheque
+    ports:
+      - '5433:5432'
+    volumes:
+      - bibliotheque-postgres-dev:/var/lib/postgresql/data
+
+volumes:
+  bibliotheque-postgres-dev:

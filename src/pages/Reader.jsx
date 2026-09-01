@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Epub from 'epubjs';
 import { getBook } from '../utils/storage.js';
 import { getProgress, saveProgress, clearProgress, flushProgress } from '../lib/progress.js';
@@ -7,6 +7,17 @@ import { getAllQuizProgress } from '../lib/quizProgress.js';
 import styles from './Reader.module.css';
 import ChatPanel from '../components/ChatPanel.jsx';
 import QuizModal from '../components/QuizModal.jsx';
+import PomodoroModal from '../components/PomodoroModal.jsx';
+
+// Pomodoro learning mode: length of one reading cycle before the end-of-cycle
+// exercise modal fires (see PomodoroModal.jsx for the break length).
+const CYCLE_MINUTES = 25;
+
+function formatClock(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 const THEMES = {
   night: {
@@ -49,6 +60,11 @@ function flattenToc(toc, depth = 0) {
 export default function Reader() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Locked for the whole reading session at mount — no mid-session toggle.
+  // Falls back to free reading if router state is missing (page refresh,
+  // direct URL): never silently force learning mode without an explicit choice.
+  const [isLearningMode] = useState(() => location.state?.mode === 'learning');
 
   const viewerRef = useRef(null);
   const viewerWrapperRef = useRef(null);
@@ -83,6 +99,16 @@ export default function Reader() {
   const prevChapterRef = useRef(null); // { href, label } of the chapter before the current one
   const nudgedChaptersRef = useRef(new Set());
   const nudgeTimerRef = useRef(null);
+
+  // ── Pomodoro learning mode ──
+  const currentChapterRef = useRef({ href: '', label: '' }); // mirrors currentChapter/currentChapterHref, read from the cycle timer's interval closure so it never goes stale
+  const activeQuizModeRef = useRef(null); // mirrors activeQuizMode, same reason
+  const cycleChaptersRef = useRef(new Map()); // Map<href, {label, text}> read during the active cycle, cleared each cycle
+  const cycleTimerRef = useRef(null);
+  const cycleEndAtRef = useRef(null);
+  const cycleDueRef = useRef(false); // cycle timer fired but modal display was deferred (a manual quiz was open)
+  const [cycleSecondsLeft, setCycleSecondsLeft] = useState(CYCLE_MINUTES * 60);
+  const [pomodoroModalOpen, setPomodoroModalOpen] = useState(false);
 
   const applyTheme = useCallback((rendition, t, size) => {
     const th = THEMES[t];
@@ -157,6 +183,62 @@ export default function Reader() {
     setChapterNudge(null);
   }, []);
 
+  useEffect(() => { activeQuizModeRef.current = activeQuizMode; }, [activeQuizMode]);
+
+  // Fires when the 25-minute wall-clock deadline is reached. The deadline
+  // itself is never paused, but if a manual quiz happens to be open right
+  // now, only the modal's *display* is deferred (see the effect below) so
+  // the two full-screen overlays never stack.
+  const onCycleComplete = useCallback(() => {
+    const { href, label } = currentChapterRef.current;
+    if (href) {
+      cycleChaptersRef.current.set(href, { label, text: pageTextRef.current });
+    }
+    cycleDueRef.current = true;
+    if (!activeQuizModeRef.current) {
+      setShowChat(false);
+      setPomodoroModalOpen(true);
+    }
+  }, []);
+
+  const startCycle = useCallback(() => {
+    cycleChaptersRef.current = new Map();
+    cycleDueRef.current = false;
+    cycleEndAtRef.current = Date.now() + CYCLE_MINUTES * 60_000;
+    setCycleSecondsLeft(CYCLE_MINUTES * 60);
+    clearInterval(cycleTimerRef.current);
+    // Deadline-based (recomputed from Date.now() each tick), not a decrementing
+    // tick counter — stays correct after a backgrounded/throttled tab or sleep,
+    // where a naive counter would drift or fire a burst of stale ticks on wake.
+    cycleTimerRef.current = setInterval(() => {
+      const remaining = cycleEndAtRef.current - Date.now();
+      if (remaining <= 0) {
+        clearInterval(cycleTimerRef.current);
+        onCycleComplete();
+      } else {
+        setCycleSecondsLeft(Math.ceil(remaining / 1000));
+      }
+    }, 1000);
+  }, [onCycleComplete]);
+
+  // Opens the deferred modal once the manual quiz that was blocking it closes.
+  useEffect(() => {
+    if (cycleDueRef.current && !activeQuizMode && !pomodoroModalOpen) {
+      cycleDueRef.current = false;
+      setShowChat(false);
+      setPomodoroModalOpen(true);
+    }
+  }, [activeQuizMode, pomodoroModalOpen]);
+
+  // Starts the first cycle once the book is ready. Only runs once (startCycle
+  // has a stable identity) — restarting subsequent cycles is driven by
+  // PomodoroModal's onCycleFinished calling startCycle() directly, not by this effect.
+  useEffect(() => {
+    if (!isLearningMode || !ready) return;
+    startCycle();
+    return () => clearInterval(cycleTimerRef.current);
+  }, [isLearningMode, ready, startCycle]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -221,11 +303,19 @@ export default function Reader() {
 
           // Chapter transition detected: pageTextRef still holds the text of
           // the chapter we're leaving (the RAF below hasn't overwritten it
-          // yet) — snapshot it now so the end-of-chapter nudge can quiz on
-          // the right content even after the iframe has moved on.
+          // yet) — snapshot it now so the end-of-chapter nudge (free reading)
+          // or the pomodoro cycle accumulator (learning mode) can use the
+          // right content even after the iframe has moved on. The two are
+          // mutually exclusive: the nudge would be redundant with — and
+          // frequently collide with — the pomodoro end-of-cycle exercises.
           if (newHref && prevChapterRef.current?.href && prevChapterRef.current.href !== newHref) {
             const leftHref = prevChapterRef.current.href;
-            if (!nudgedChaptersRef.current.has(leftHref)) {
+            if (isLearningMode) {
+              cycleChaptersRef.current.set(leftHref, {
+                label: prevChapterRef.current.label,
+                text: pageTextRef.current,
+              });
+            } else if (!nudgedChaptersRef.current.has(leftHref)) {
               nudgedChaptersRef.current.add(leftHref);
               setChapterNudge({
                 href: leftHref,
@@ -238,6 +328,7 @@ export default function Reader() {
           }
           if (newHref) prevChapterRef.current = { href: newHref, label: newLabel };
 
+          currentChapterRef.current = { href: newHref, label: newLabel };
           setCurrentChapter(newLabel);
           setCurrentChapterHref(newHref);
           requestAnimationFrame(() => { if (!cancelled) pageTextRef.current = capturePageText(); });
@@ -484,6 +575,11 @@ export default function Reader() {
         <div className={styles.topTitle} style={{ color: th.text }}>
           {metadata?.title}
         </div>
+        {isLearningMode && (
+          <span className={styles.pomodoroPill} style={{ color: th.text, borderColor: `${th.text}30` }} title="Session Pomodoro en cours">
+            Pomodoro · {formatClock(cycleSecondsLeft)}
+          </span>
+        )}
         <div className={styles.topActions}>
           <button
             className={`${styles.iconBtn} ${showChat ? styles.active : ''}`}
@@ -579,8 +675,9 @@ export default function Reader() {
       )}
 
       {/* End-of-chapter quiz nudge — deliberately not theme-colored (th.*),
-          see .chapterNudge comment in Reader.module.css */}
-      {chapterNudge && (
+          see .chapterNudge comment in Reader.module.css. Never set while in
+          learning mode (see relocated handler above), guarded here too. */}
+      {!isLearningMode && chapterNudge && (
         <div className={styles.chapterNudge} onClick={(e) => e.stopPropagation()}>
           <span className={styles.chapterNudgeText}>
             Chapitre terminé — tester tes connaissances sur « {chapterNudge.label || 'ce chapitre'} » ?
@@ -821,6 +918,21 @@ export default function Reader() {
             setActiveQuizMode(null);
             setQuizTarget(null);
             refreshQuizProgress();
+          }}
+        />
+      )}
+
+      {/* Pomodoro end-of-cycle overlay */}
+      {isLearningMode && pomodoroModalOpen && (
+        <PomodoroModal
+          bookId={id}
+          bookTitle={metadata?.title || ''}
+          bookAuthor={metadata?.creator || ''}
+          cycleMinutes={CYCLE_MINUTES}
+          chapters={Array.from(cycleChaptersRef.current.values())}
+          onCycleFinished={() => {
+            setPomodoroModalOpen(false);
+            startCycle();
           }}
         />
       )}

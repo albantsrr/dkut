@@ -1,45 +1,20 @@
-import { loadData, saveData } from './driveStorage.js';
-import { flushProgress } from './progress.js';
+import { apiGet, apiPutJson, apiPostJson } from './api.js';
 
-// In-memory mirror of data.quizProgress, mirrors the pattern in progress.js.
-// Shape: { [bookId]: { [chapterHref]: { exercise: Entry, interview: Entry } } }
-// where Entry = { questions, generatedAt, bestScore, total, attempts, completed, lastAttemptAt }.
-let _quizProgress = null;
-
-async function ensureQuizProgress() {
-  if (!_quizProgress) {
-    const data = await loadData();
-    _quizProgress = data.quizProgress ?? {};
-  }
-}
-
-async function persistQuizProgress() {
-  // Reduce the window for the known read-whole-blob/write-whole-blob race
-  // with progress.js's debounced writes (same limitation as customPrompts.js).
-  flushProgress();
-  const data = await loadData();
-  data.quizProgress = _quizProgress;
-  await saveData(data);
-}
+// Every call hits server/src/routes/quiz.js directly — no in-memory mirror.
+// Unlike progress.js this isn't on a hot path (reads happen once per quiz
+// open, writes once per generation/attempt), so there's nothing worth
+// shielding with a cache, and always-fresh reads are simpler to reason about.
 
 // Returns the cached entry for one book/chapter/mode, or null if no quiz
 // has been generated for it yet.
 export async function getQuizProgress(bookId, chapterHref, mode) {
-  await ensureQuizProgress();
-  return _quizProgress[bookId]?.[chapterHref]?.[mode] ?? null;
+  return apiGet(`/books/${bookId}/quiz/${encodeURIComponent(chapterHref)}/${mode}`);
 }
 
 // Returns { [chapterHref]: { exercise, interview } } for one book, used to
 // compute completion badges across the whole TOC.
 export async function getAllQuizProgress(bookId) {
-  await ensureQuizProgress();
-  return _quizProgress[bookId] ?? {};
-}
-
-function ensureChapterEntry(bookId, chapterHref) {
-  if (!_quizProgress[bookId]) _quizProgress[bookId] = {};
-  if (!_quizProgress[bookId][chapterHref]) _quizProgress[bookId][chapterHref] = {};
-  return _quizProgress[bookId][chapterHref];
+  return apiGet(`/books/${bookId}/quiz`);
 }
 
 // Persisted as soon as a quiz is generated, independently of whether the
@@ -50,38 +25,14 @@ function ensureChapterEntry(bookId, chapterHref) {
 // stats always start over rather than carrying forward the previous set's
 // score/attempts, which belonged to different questions.
 export async function saveQuizQuestions(bookId, chapterHref, mode, questions) {
-  await ensureQuizProgress();
-  const chapter = ensureChapterEntry(bookId, chapterHref);
-  chapter[mode] = {
-    questions,
-    generatedAt: new Date().toISOString(),
-    bestScore: 0,
-    total: questions.length,
-    attempts: 0,
-    completed: false,
-    lastAttemptAt: null,
-  };
-  await persistQuizProgress();
+  await apiPutJson(`/books/${bookId}/quiz/${encodeURIComponent(chapterHref)}/${mode}`, { questions });
 }
 
 // Called when a quiz playthrough reaches the summary screen.
 export async function saveQuizAttempt(bookId, chapterHref, mode, { score, total }) {
-  await ensureQuizProgress();
-  const chapter = ensureChapterEntry(bookId, chapterHref);
-  const existing = chapter[mode] ?? { questions: [], bestScore: 0, attempts: 0 };
-  chapter[mode] = {
-    ...existing,
-    total,
-    bestScore: Math.max(existing.bestScore ?? 0, score),
-    attempts: (existing.attempts ?? 0) + 1,
-    completed: true,
-    lastAttemptAt: new Date().toISOString(),
-  };
-  await persistQuizProgress();
+  await apiPostJson(`/books/${bookId}/quiz/${encodeURIComponent(chapterHref)}/${mode}/attempt`, { score, total });
 }
 
-// Called on sign-out so a subsequent sign-in with a different account
-// starts with a fresh fetch rather than stale data.
-export function resetQuizProgress() {
-  _quizProgress = null;
-}
+// No-op: nothing is cached in memory here anymore. Kept so AuthContext's
+// sign-out sequence doesn't need to change.
+export function resetQuizProgress() {}

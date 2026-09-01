@@ -3,11 +3,12 @@ import {
   initGoogleAuth, isSignedIn, requestSignIn,
   signOut as gSignOut, getAccessToken,
 } from '../lib/googleAuth.js';
-import { resetDriveStorage } from '../lib/driveStorage.js';
 import { resetProgress } from '../lib/progress.js';
 import { resetCustomPrompts } from '../lib/customPrompts.js';
 import { resetQuizProgress } from '../lib/quizProgress.js';
+import { resetPomodoroLog } from '../lib/pomodoroLog.js';
 import { clearAllCache } from '../lib/bookCache.js';
+import { apiPostJson, apiPost } from '../lib/api.js';
 
 const AuthContext = createContext(null);
 
@@ -20,6 +21,23 @@ async function fetchUserInfo() {
   return res.json(); // { sub, name, email, picture }
 }
 
+// Piggybacks a backend session (server/) on top of the existing Google OAuth
+// access token — see server/src/routes/auth.js. Sign-in itself still goes
+// through the original Drive OAuth2 popup (src/lib/googleAuth.js): the
+// backend never needed a competing ID-token/GIS-button flow, it just needed
+// a token to verify. The `drive` scope that flow still requests is now wider
+// than anything in this app actually calls (everything migrated off Drive as
+// of MIGRATION_PLAN.md phase 3) — narrowing it is a separate cleanup, not
+// done here since it requires a SCOPE_VER bump and forces re-consent for
+// every signed-in user. A failure here must never block sign-in itself.
+async function establishBackendSession() {
+  try {
+    await apiPostJson('/auth/google', { accessToken: getAccessToken() });
+  } catch (err) {
+    console.error('[AuthContext] backend session sync failed:', err);
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,6 +48,7 @@ export function AuthProvider({ children }) {
         await initGoogleAuth();
         if (isSignedIn()) {
           const info = await fetchUserInfo();
+          await establishBackendSession();
           setUser(info);
         }
       } catch (err) {
@@ -45,6 +64,7 @@ export function AuthProvider({ children }) {
   const signIn = useCallback(async () => {
     await requestSignIn();
     const info = await fetchUserInfo();
+    await establishBackendSession();
     setUser(info);
   }, []);
 
@@ -64,10 +84,11 @@ export function AuthProvider({ children }) {
 
   const signOut = useCallback(async () => {
     gSignOut();
-    resetDriveStorage();
+    await apiPost('/auth/logout').catch(() => {});
     resetProgress();
     resetCustomPrompts();
     resetQuizProgress();
+    resetPomodoroLog();
     await clearAllCache();
     setUser(null);
   }, []);

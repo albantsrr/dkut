@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Library from './pages/Library.jsx';
 import Reader from './pages/Reader.jsx';
+import Stats from './pages/Stats.jsx';
 import Auth from './pages/Auth.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
@@ -14,6 +15,9 @@ export default function App() {
         } />
         <Route path="/read/:id" element={
           <ProtectedRoute><Reader /></ProtectedRoute>
+        } />
+        <Route path="/stats" element={
+          <ProtectedRoute><Stats /></ProtectedRoute>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

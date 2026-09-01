@@ -182,9 +182,8 @@ function validateBatch(requestSegments, rawTranslations) {
   return { ok: true, map };
 }
 
-async function attemptBatch(segs, { apiKey, targetLangLabel, signal }) {
+async function attemptBatch(segs, { targetLangLabel, signal }) {
   const raw = await translateSegments({
-    apiKey,
     segments: segs.map(s => ({ id: s.id, text: s.text })),
     targetLangLabel,
     signal,
@@ -198,7 +197,7 @@ async function attemptBatch(segs, { apiKey, targetLangLabel, signal }) {
 // fabricated translation — and is counted in fallbackIds. `logs` collects
 // human-readable diagnostics for every retry/fallback, so callers can surface
 // *why* a batch or segment needed a fallback, not just that it did.
-async function translateBatchWithRetry({ apiKey, batch, targetLangLabel, signal, cache, targetLang }) {
+async function translateBatchWithRetry({ batch, targetLangLabel, signal, cache, targetLang }) {
   const result = new Map();
   const toRequest = [];
   const logs = [];
@@ -211,7 +210,7 @@ async function translateBatchWithRetry({ apiKey, batch, targetLangLabel, signal,
 
   const tryOnce = async (segs) => {
     try {
-      return await attemptBatch(segs, { apiKey, targetLangLabel, signal });
+      return await attemptBatch(segs, { targetLangLabel, signal });
     } catch (err) {
       if (err.name === 'AbortError') throw err;
       return { ok: false, reason: err.message || 'CALL_ERROR' };
@@ -388,8 +387,7 @@ export async function estimateTranslation({ arrayBuffer }) {
  *   { type: 'done', blob, stats }
  *   { type: 'aborted', fromIndex? }
  */
-export async function* translateEpub({ apiKey, arrayBuffer, targetLang = 'fr', signal }) {
-  if (!apiKey) throw new Error('NO_API_KEY');
+export async function* translateEpub({ arrayBuffer, targetLang = 'fr', signal }) {
   yield { type: 'loading' };
 
   const targetLangLabel = languageLabel(targetLang);
@@ -420,7 +418,7 @@ export async function* translateEpub({ apiKey, arrayBuffer, targetLang = 'fr', s
         const doc = parseXhtml(raw);
         const segments = buildSegments(collectBlocks(doc), 's');
         let segmentCount = 0, translatedCount = 0, fallbackCount = 0;
-        for await (const evt of runSegments(segments, { apiKey, targetLang, targetLangLabel, signal, cache })) {
+        for await (const evt of runSegments(segments, { targetLang, targetLangLabel, signal, cache })) {
           if (evt.type === 'batch-done') {
             yield { type: 'chapter-progress', index: i, href: section.href, batchIndex: evt.batchIndex, batchTotal: evt.batchTotal };
           } else if (evt.type === 'log') {
@@ -447,7 +445,7 @@ export async function* translateEpub({ apiKey, arrayBuffer, targetLang = 'fr', s
         if (raw != null && !hasReservedTokenCollision(raw)) {
           const doc = parseXhtml(raw);
           const navSegments = buildSegments(collectNavLabelElements(doc, navInfo.isNcx), 'n', 1);
-          for await (const evt of runSegments(navSegments, { apiKey, targetLang, targetLangLabel, signal, cache })) {
+          for await (const evt of runSegments(navSegments, { targetLang, targetLangLabel, signal, cache })) {
             if (evt.type === 'batch-done') {
               yield { type: 'nav-progress', batchIndex: evt.batchIndex, batchTotal: evt.batchTotal };
             } else if (evt.type === 'log') {

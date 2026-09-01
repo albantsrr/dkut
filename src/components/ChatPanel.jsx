@@ -5,7 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { streamChatMessage, generateRevisionSheet, generateRevisionSet, generateSheetForConcept } from '../lib/geminiApi.js';
-import { saveNotesheet } from '../lib/driveStorage.js';
+import { saveNotesheet } from '../lib/revisionSheets.js';
 import { getAllPrompts, savePrompt, deletePrompt } from '../lib/customPrompts.js';
 import styles from './ChatPanel.module.css';
 
@@ -242,8 +242,6 @@ export default function ChatPanel({
     const userText = (overrideText ?? inputValue).trim();
     if (!userText || isLoading) return;
 
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
     setInputValue('');
     setError(null);
 
@@ -264,7 +262,6 @@ export default function ChatPanel({
       const historySnapshot = buildHistory([...messages, userMsg]);
 
       const stream = streamChatMessage({
-        apiKey,
         userMessage: userText,
         pageText,
         bookTitle,
@@ -299,7 +296,6 @@ export default function ChatPanel({
 
   const handleCreateRevisionSheet = useCallback(async () => {
     if (isLoading) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     setError(null);
     setIsLoading(true);
 
@@ -312,7 +308,6 @@ export default function ChatPanel({
     try {
       const pageText = getPageText();
       const text = await generateRevisionSheet({
-        apiKey,
         pageText,
         bookTitle,
         bookAuthor,
@@ -333,7 +328,6 @@ export default function ChatPanel({
 
   const handleCreateRevisionSet = useCallback(async () => {
     if (isLoading) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     setError(null);
     setIsLoading(true);
 
@@ -351,7 +345,7 @@ export default function ChatPanel({
     try {
       const pageText = getPageText();
       for await (const event of generateRevisionSet({
-        apiKey, pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
+        pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
       })) {
         switch (event.type) {
           case 'plan':
@@ -397,7 +391,6 @@ export default function ChatPanel({
     const setMsg = messages.find(m => m.id === setId);
     const sheet = setMsg?.cards?.[index];
     if (!sheet) return;
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
     setMessages(prev => prev.map(m =>
       m.id === setId
@@ -406,7 +399,7 @@ export default function ChatPanel({
     ));
     try {
       const pageText = getPageText();
-      const text = await generateSheetForConcept({ apiKey, pageText, bookTitle, bookAuthor, chapterName, sheet });
+      const text = await generateSheetForConcept({ pageText, bookTitle, bookAuthor, chapterName, sheet });
       setMessages(prev => prev.map(m =>
         m.id === setId
           ? { ...m, cards: m.cards.map((c, i) => (i === index ? { ...c, status: 'done', text } : c)) }
@@ -842,7 +835,7 @@ export default function ChatPanel({
         {error && (
           <div className={styles.errorBanner}>
             {error === 'NO_API_KEY'
-              ? 'API key missing. Add VITE_GEMINI_API_KEY to .env.local (get it at ai.google.dev)'
+              ? 'Gemini API key missing on the server. Add GEMINI_API_KEY to server/.env (get it at ai.google.dev)'
               : `Error: ${error}`}
           </div>
         )}
