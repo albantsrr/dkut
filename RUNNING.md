@@ -42,12 +42,68 @@ npm run dev                    # http://localhost:5173 (ou le port affiché)
 
 Ouvrir l'URL du frontend, se connecter avec Google.
 
-## Lancer en prod
+## Lancer en prod (Docker Compose)
 
-**Pas encore fait — Phase 6 de `MIGRATION_PLAN.md`.** Ce qui suit est le plan prévu, pas une procédure testée :
+Tout tourne en conteneurs : `postgres`, `app` (backend Node, migration au démarrage), `nginx` (statique + reverse-proxy `/api`), `certbot` (renouvellement TLS). Fichiers : `docker-compose.prod.yml`, `Dockerfile` (racine, frontend), `server/Dockerfile`, `nginx/nginx.conf`.
 
-- VPS avec Docker Compose : conteneurs `app` (backend + build frontend servi par Nginx), `postgres`, `nginx` (reverse-proxy + TLS Let's Encrypt).
-- Mêmes variables d'env que ci-dessus, avec `STORAGE_DIR` pointant vers un volume persistant (ex. `/var/lib/bibliotheque/data`) et `CORS_ORIGIN`/le client OAuth pointant vers le vrai domaine.
-- Sauvegardes : `pg_dump` (Postgres) + rsync du volume fichiers.
+### Configuration (une seule fois, sur le VPS)
 
-À détailler et tester quand on attaquera cette phase.
+```bash
+cp .env.prod.example .env.prod        # POSTGRES_PASSWORD
+cp server/.env.prod.example server/.env  # DATABASE_URL (même mot de passe que .env.prod !), GOOGLE_CLIENT_ID, SESSION_SECRET, GEMINI_API_KEY, CORS_ORIGIN
+```
+
+Remplir aussi le `.env` **racine** (celui de Vite, lu au moment du build par le `Dockerfile` frontend — pas `.env.prod`) avec les valeurs de prod : `VITE_GOOGLE_CLIENT_ID` (même client OAuth) et `VITE_API_URL=/api` (chemin relatif, proxifié par Nginx — voir `.env.prod.example` pour le détail). ⚠️ Remettre la valeur de dev (`http://localhost:8787`) après le build si tu développes aussi en local sur cette machine.
+
+Domaine de prod : `dkut.online` (déjà en place dans `nginx/nginx.conf` — `server_name` et chemins de certificats).
+
+### Premier lancement (bootstrap TLS)
+
+Nginx refuse de démarrer sans certificat, mais Let's Encrypt a besoin que Nginx tourne pour valider le domaine — œuf et poule, résolu en 2 temps avec `nginx/nginx.bootstrap.conf` (HTTP seul, pas de bloc TLS) :
+
+```bash
+# 1. Build
+docker compose -f docker-compose.prod.yml --env-file .env.prod build
+
+# 2. Postgres seul, puis attendre qu'il soit prêt
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d postgres
+
+# 3. Nginx en conf bootstrap (HTTP seul) le temps d'obtenir le certificat
+cp nginx/nginx.conf nginx/nginx.conf.bak
+cp nginx/nginx.bootstrap.conf nginx/nginx.conf
+docker compose -f docker-compose.prod.yml --env-file .env.prod build nginx
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d nginx
+
+# 4. Obtenir le certificat (remplacer TON_EMAIL)
+docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm certbot \
+  certonly --webroot -w /var/www/certbot -d dkut.online --email TON_EMAIL --agree-tos --no-eff-email
+
+# 5. Restaurer la vraie conf (TLS) et tout démarrer
+mv nginx/nginx.conf.bak nginx/nginx.conf
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+
+`app` applique le schéma (`npm run migrate`, idempotent) à chaque démarrage, avant de lancer le serveur — pas d'étape de migration séparée à retenir pour les déploiements suivants.
+
+### Mises à jour (déploiements suivants)
+
+```bash
+git pull origin main
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+
+`certbot` tourne en continu dans son propre conteneur et renouvelle le certificat automatiquement (`certbot renew` toutes les 12h) — rien à faire une fois le bootstrap ci-dessus passé.
+
+### Vérification
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps      # tous "running"
+docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f app   # pas de "Missing required env var"
+curl -I https://dkut.online/api/health   # doit répondre 200 (route server/src/index.js)
+```
+
+Puis test complet en navigateur externe (pas depuis le VPS, pour valider TLS/CORS réels) : sign-in Google, upload d'un EPUB, lecture, génération d'un quiz/fiche/pomodoro.
+
+### Sauvegardes
+
+Pas encore mis en place. Prévu : `pg_dump` sur le service `postgres` + backup du volume `bibliotheque-files` (fichiers EPUB/couvertures), en cron sur le VPS.

@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bibliotheque
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set (see .env.prod)}
+      POSTGRES_DB: bibliotheque
+    volumes:
+      - bibliotheque-postgres-prod:/var/lib/postgresql/data
+
+  app:
+    build: ./server
+    restart: unless-stopped
+    env_file: ./server/.env
+    volumes:
+      - bibliotheque-files:/app/data
+    depends_on:
+      - postgres
+
+  nginx:
+    build: .
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - certbot-conf:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    depends_on:
+      - app
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot-conf:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: >
+      sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done"
+
+volumes:
+  bibliotheque-postgres-prod:
+  bibliotheque-files:
+  certbot-conf:
+  certbot-www:

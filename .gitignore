@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 .env.local
+.env.prod
 asup
 epub/
 server/data/

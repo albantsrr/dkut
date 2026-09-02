@@ -1,6 +1,6 @@
 # Migration Drive → backend auto-hébergé (VPS)
 
-> **Statut** : Phases 1–5 faites — voir `server/` et `src/components/ImportFromDriveModal.jsx`. Plus rien dans l'app live ne lit/écrit Google Drive comme fonctionnement normal (seul l'import ponctuel y accède encore, volontairement), et plus aucune clé Gemini côté client. Reste à valider avec un vrai sign-in Google en navigateur et un vrai compte Drive (non scriptable depuis l'agent). Phase 6 (déploiement VPS) pas commencée.
+> **Statut** : Phases 1–5 faites — voir `server/` et `src/components/ImportFromDriveModal.jsx`. Plus rien dans l'app live ne lit/écrit Google Drive comme fonctionnement normal (seul l'import ponctuel y accède encore, volontairement), et plus aucune clé Gemini côté client. Phase 6 (déploiement VPS) : code Docker Compose fait (`docker-compose.prod.yml`, Dockerfiles, `nginx/`, procédure dans `RUNNING.md`), pas encore exécuté/validé sur le vrai VPS — celui-ci tourne encore sur l'ancienne architecture 100% Drive, sans donnée à migrer (voir `RUNNING.md`).
 >
 > Note d'implémentation (Phase 1–2) : l'auth backend vérifie l'**access token** OAuth2 déjà utilisé par le flow Google Sign-In existant (via `tokeninfo`/`userinfo` de Google), pas un ID token via un bouton GIS dédié comme décrit plus bas. Ce choix reste valable maintenant que Phases 3–5 sont finies : le flow OAuth2 est toujours ce qui authentifie l'utilisateur, donc pas de raison de le remplacer tant qu'un nettoyage dédié n'est pas fait exprès.
 >
@@ -32,19 +32,21 @@ Ce document est un plan d'architecture et une feuille de route par phases — pa
 Navigateur (React/Vite, statique)
    │  fetch, credentials: 'include' (cookie de session httpOnly)
    ▼
-Nginx (VPS) — TLS Let's Encrypt, sert le build statique, reverse-proxy /api/*
+Nginx (conteneur Docker) — TLS Let's Encrypt (certbot, conteneur dédié),
+sert le build statique, reverse-proxy /api/* → backend
    ▼
-Backend Node/Express (VPS, PM2 ou systemd)
+Backend Node/Express (conteneur Docker "app", migration auto au démarrage)
    │              │
    ▼              ▼
-Postgres      Disque local (/var/lib/bibliotheque/{userId}/…)
-(métadonnées)  (fichiers EPUB + couvertures)
+Postgres      Volume Docker "bibliotheque-files"
+(conteneur,    ({userId}/books/{bookId}.epub, .../covers/…)
+volume dédié)
    │
    ▼
 Appels Gemini (server-side, clé API jamais exposée au navigateur)
 ```
 
-Docker Compose recommandé pour le VPS (services `app`, `postgres`, `nginx`) — reproductible, facilite les sauvegardes (volume Postgres + volume fichiers).
+Tout tourne sous Docker Compose (services `app`, `postgres`, `nginx`, `certbot`) — voir `docker-compose.prod.yml` et la procédure de déploiement dans `RUNNING.md`. Différence par rapport à l'intention initiale ci-dessous ("PM2 ou systemd") : le backend est lui aussi conteneurisé plutôt que lancé nativement sur l'hôte, pour que l'app entière soit reproductible et déployable en une commande.
 
 ## Modèle de données (Postgres)
 
@@ -100,7 +102,7 @@ Pour limiter la casse dans `Library.jsx`, `Reader.jsx`, `ChatPanel.jsx`, `QuizMo
 3. **Progression / prompts / quiz / pomodoro / notes** ✅ — un module Drive à la fois migré vers son endpoint + table, en gardant la façade JS identique. Testable module par module (la progression de lecture se sauve, le quiz garde son meilleur score, etc.).
 4. **IA côté serveur** ✅ — déplacer tous les appels `@google/generative-ai` dans le backend, `geminiApi.js` devient un client HTTP vers `/ai/*` (chat en streaming brut, revision-set en NDJSON, le reste en JSON simple). `VITE_GEMINI_API_KEY` supprimée du frontend.
 5. **Import Drive → nouveau backend** ✅ — finalement construit comme un outil in-app (`ImportFromDriveModal.jsx`, bouton dans Library.jsx) plutôt qu'un script Node autonome, pour éviter un second flow OAuth et le fait qu'epubjs (extraction de couverture) ne tourne pas hors navigateur. Réutilise `driveStorage.js`/`driveApi.js` en lecture et les façades déjà branchées au nouveau backend en écriture. Un run, un seul compte (le tien) au départ ; rejouable sans risque sauf pour les fiches de révision (voir CLAUDE.md § One-time Drive import).
-6. **Déploiement VPS** — Docker Compose (`app`, `postgres`, `nginx` + Let's Encrypt), variables d'env (`DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GEMINI_API_KEY`, `SESSION_SECRET`), volumes persistants pour Postgres et les fichiers, stratégie de backup (`pg_dump` + rsync du volume fichiers, cron).
+6. **Déploiement VPS** ✅ (code fait, non encore testé sur le vrai VPS) — Docker Compose (`app`, `postgres`, `nginx`, `certbot` + Let's Encrypt) au lieu du PM2/systemd initialement envisagé plus haut : `docker-compose.prod.yml`, `Dockerfile` (racine, frontend statique), `server/Dockerfile`, `nginx/nginx.conf` (proxy `/api` → backend, `client_max_body_size` relevée pour matcher la limite multer de 500 Mo). Procédure complète (bootstrap TLS œuf-et-poule inclus, `nginx/nginx.bootstrap.conf`) dans `RUNNING.md`. `app` applique `npm run migrate` (idempotent) à chaque démarrage du conteneur. Volumes persistants pour Postgres et les fichiers (`bibliotheque-postgres-prod`, `bibliotheque-files`). Sauvegarde (`pg_dump` + rsync du volume fichiers) pas encore mise en place.
 7. **Plus tard, hors scope immédiat** — écran de signup pour de nouveaux users, quotas de stockage par compte, rate-limiting des appels IA par user, observabilité (logs, erreurs). À ne pas construire avant que 1–6 tournent correctement pour ton propre usage.
 
 ## Vérification
@@ -108,4 +110,4 @@ Pour limiter la casse dans `Library.jsx`, `Reader.jsx`, `ChatPanel.jsx`, `QuizMo
 - Phases 1–3 : lancer Postgres local (Docker), lancer le backend en dev, pointer le frontend Vite dessus (`VITE_API_URL`), reproduire chaque flow existant (upload livre, lecture avec sauvegarde de progression, quiz, session pomodoro, prompts custom) et confirmer qu'il n'y a plus aucun appel réseau vers `googleapis.com/drive`.
 - Phase 4 : confirmer via l'onglet réseau du navigateur qu'aucune clé Gemini ne transite plus côté client, et que le chat streame toujours correctement depuis `/ai/chat`.
 - Phase 5 : cliquer "Importer depuis Drive" dans la bibliothèque (compte réel, avec de vraies données Drive), puis comparer manuellement quelques livres/scores/prompts entre l'ancien Drive et le nouveau Postgres pour valider l'intégrité. Vérifier aussi qu'un second clic ne duplique pas les livres/progression/quiz (comportement attendu), mais duplique bien les fiches de révision (limite connue, pas un bug).
-- Phase 6 : déploiement sur le VPS réel, test complet en HTTPS depuis un navigateur externe, redémarrage du VPS pour vérifier que PM2/systemd + Docker Compose relancent bien tous les services.
+- Phase 6 : déploiement sur le VPS réel (procédure dans `RUNNING.md`), test complet en HTTPS depuis un navigateur externe, redémarrage du VPS pour vérifier que `docker compose` (grâce à `restart: unless-stopped` sur chaque service) relance bien tout automatiquement.
