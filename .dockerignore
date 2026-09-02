@@ -1,7 +1,8 @@
 node_modules
 dist
-.env
 .env.example
+.env.prod
+.env.prod.example
 server
 test epub
 .git
