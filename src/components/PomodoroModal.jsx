@@ -29,10 +29,13 @@ function scoreMessage(score, total) {
  * Reader entirely is the only way out of an active cycle — consistent with
  * an interrupted cycle never being counted (see pomodoroLog.js).
  */
+// startLoc/endLoc are epubjs "location" indices (book.locations.generate(1600)
+// slices the book into ~1600-char units) — not printed page numbers, hence
+// "position" rather than "page" here to avoid implying real page numbers.
 function formatChapterRange(chapter, totalLocations) {
   const { startLoc, endLoc } = chapter;
   if (startLoc == null || endLoc == null) return '';
-  const range = startLoc === endLoc ? `page ${startLoc}` : `pages ${startLoc}–${endLoc}`;
+  const range = startLoc === endLoc ? `position ${startLoc}` : `positions ${startLoc}–${endLoc}`;
   return totalLocations ? `${range} / ${totalLocations}` : range;
 }
 
@@ -142,7 +145,10 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
                   ? "Pas assez de texte lu pendant cette session pour générer des exercices."
                   : `Erreur : ${error}`}
               </p>
-              <button className={styles.primaryBtn} onClick={load}>Réessayer</button>
+              <div className={styles.startActions}>
+                <button className={styles.primaryBtn} onClick={load}>Réessayer</button>
+                <button className={styles.secondaryBtn} onClick={onCycleFinished}>Fermer</button>
+              </div>
             </div>
           )}
 

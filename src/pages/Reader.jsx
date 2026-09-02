@@ -148,14 +148,25 @@ export default function Reader() {
     rendition.themes.select('current');
   }, []);
 
-  const capturePageText = useCallback(() => {
+  // `fraction` (0-1) truncates the returned text to that proportion of the
+  // chapter's elements — epubjs's paginated flow loads the WHOLE section into
+  // the iframe and paginates it purely via CSS columns, so without this the
+  // full chapter (including content far past what's been read) is always
+  // present in the DOM from the moment the chapter loads. Element-count
+  // truncation (not exact) rather than a DOM Range/CFI cut: cheap, can't
+  // throw, and precise enough — CFI range math is already documented
+  // elsewhere in this file as fragile after in-place DOM translation.
+  const capturePageText = useCallback((fraction = 1) => {
     try {
       const iframe = viewerRef.current?.querySelector('iframe');
       const doc = iframe?.contentDocument;
       if (!doc?.body) return '';
-      return Array.from(
+      const elements = Array.from(
         doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, pre')
-      )
+      );
+      const cutoff = fraction >= 1 ? elements.length : Math.ceil(elements.length * Math.max(0, fraction));
+      return elements
+        .slice(0, cutoff)
         .map(el => {
           const text = el.textContent.trim();
           if (el.tagName === 'PRE') return `\n\`\`\`\n${text}\n\`\`\``;
@@ -334,12 +345,17 @@ export default function Reader() {
           );
           const newLabel = match?.label?.trim() || '';
 
-          // Tracks the first/last epubjs location number seen in each chapter
+          // Tracks the min/max epubjs location number seen in each chapter
           // during the active cycle, so the Pomodoro modal can show a "page
           // X–Y" range alongside the chapter name (see cycleChaptersRef below).
+          // Min/max (not first/last) because a relocate can fire out of order
+          // (backward navigation within the chapter, or a reflow-triggered
+          // rerender) — using "last seen" for endLoc let the range shrink.
           if (isLearningMode && newHref && locNum != null) {
-            const range = chapterLocRangeRef.current.get(newHref) ?? { startLoc: locNum, endLoc: locNum };
-            range.endLoc = locNum;
+            const prevRange = chapterLocRangeRef.current.get(newHref);
+            const range = prevRange
+              ? { startLoc: Math.min(prevRange.startLoc, locNum), endLoc: Math.max(prevRange.endLoc, locNum) }
+              : { startLoc: locNum, endLoc: locNum };
             chapterLocRangeRef.current.set(newHref, range);
           }
 
@@ -374,7 +390,12 @@ export default function Reader() {
           currentChapterRef.current = { href: newHref, label: newLabel };
           setCurrentChapter(newLabel);
           setCurrentChapterHref(newHref);
-          requestAnimationFrame(() => { if (!cancelled) pageTextRef.current = capturePageText(); });
+          // Only capture up through the page currently displayed — not the
+          // whole chapter — so AI features never see content further ahead
+          // than what's actually been read (see capturePageText above).
+          const displayed = loc.end?.displayed;
+          const readFraction = displayed?.total ? displayed.page / displayed.total : 1;
+          requestAnimationFrame(() => { if (!cancelled) pageTextRef.current = capturePageText(readFraction); });
           setPageChangeSignal(n => n + 1);
         });
         r.on('keyup', (e) => {
