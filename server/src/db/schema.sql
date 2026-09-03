@@ -74,8 +74,10 @@ CREATE TABLE IF NOT EXISTS quiz_progress (
   attempts        INTEGER NOT NULL DEFAULT 0,
   completed       BOOLEAN NOT NULL DEFAULT false,
   last_attempt_at TIMESTAMPTZ,
+  chapter_label   TEXT,
   PRIMARY KEY (user_id, book_id, chapter_href, mode)
 );
+ALTER TABLE quiz_progress ADD COLUMN IF NOT EXISTS chapter_label TEXT;
 
 CREATE TABLE IF NOT EXISTS pomodoro_log (
   user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -88,6 +90,20 @@ CREATE TABLE IF NOT EXISTS pomodoro_log (
   last_session_at     TIMESTAMPTZ,
   PRIMARY KEY (user_id, book_id)
 );
+
+-- Persists each Pomodoro cycle's generated exercises, otherwise lost once
+-- PomodoroModal closes (pomodoro_log above only keeps aggregate counters) —
+-- feeds the "Tester ses connaissances" practice pool (practicePool.js) alongside
+-- quiz_progress's mode='exercise' rows.
+CREATE TABLE IF NOT EXISTS pomodoro_exercises (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  book_id        UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  chapter_label  TEXT,
+  questions_json JSONB NOT NULL,
+  generated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pomodoro_exercises_user_book_idx ON pomodoro_exercises(user_id, book_id);
 
 CREATE TABLE IF NOT EXISTS revision_sheets (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),

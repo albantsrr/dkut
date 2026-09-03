@@ -5,6 +5,7 @@ import { getAllBooks, saveBook, deleteBook } from '../utils/storage.js';
 import { getAllProgress, clearProgress } from '../lib/progress.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import TranslateBookModal from '../components/TranslateBookModal.jsx';
+import KnowledgeTestModal from '../components/KnowledgeTestModal.jsx';
 import ReadingModeModal from '../components/ReadingModeModal.jsx';
 import UserMenu from '../components/UserMenu.jsx';
 import styles from './Library.module.css';
@@ -67,6 +68,7 @@ export default function Library() {
   const [fetchError, setFetchError] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [translatingBook, setTranslatingBook] = useState(null);
+  const [practiceBook, setPracticeBook] = useState(null);
   const [choosingBook, setChoosingBook] = useState(null);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
@@ -147,6 +149,11 @@ export default function Library() {
   const handleTranslateClick = (e, book) => {
     e.stopPropagation();
     setTranslatingBook(book);
+  };
+
+  const handlePracticeClick = (e, book) => {
+    e.stopPropagation();
+    setPracticeBook(book);
   };
 
   const handleTranslated = useCallback(() => {
@@ -331,6 +338,15 @@ export default function Library() {
                         ⇄
                       </button>
                     )}
+
+                    <button
+                      className={styles.practiceBtn}
+                      onClick={(e) => handlePracticeClick(e, book)}
+                      title="Tester mes connaissances"
+                      aria-label="Test my knowledge on this book"
+                    >
+                      🎯
+                    </button>
                   </article>
                 );
               })}
@@ -372,6 +388,13 @@ export default function Library() {
           book={choosingBook}
           onChoose={handleChooseMode}
           onClose={() => setChoosingBook(null)}
+        />
+      )}
+
+      {practiceBook && (
+        <KnowledgeTestModal
+          book={practiceBook}
+          onClose={() => setPracticeBook(null)}
         />
       )}
 

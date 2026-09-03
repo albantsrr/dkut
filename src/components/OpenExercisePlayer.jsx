@@ -42,10 +42,17 @@ export default function OpenExercisePlayer({ exercises, pageText, bookTitle, boo
   const [result, setResult] = useState(null); // { verdict, feedback }
   const [error, setError] = useState(null);
   const [hintsShown, setHintsShown] = useState(false);
+  const [mathCheck, setMathCheck] = useState(null); // { checking: bool, pass: bool|null, error: string|null }
   const scoreRef = useRef(0);
   const abortRef = useRef(null);
 
   const exercise = exercises[current];
+  // A pooled review session (KnowledgeTestModal) mixes exercises from
+  // different chapters/cycles — each item can carry its own grounding
+  // context via these underscore-prefixed fields, falling back to the
+  // component-level props used by QuizModal/PomodoroModal (single chapter).
+  const exerciseChapterName = exercise?._chapterName ?? chapterName;
+  const exercisePageText = exercise?._pageText ?? pageText;
 
   useEffect(() => {
     setAnswer(exercise?.starterCode || '');
@@ -53,10 +60,26 @@ export default function OpenExercisePlayer({ exercises, pageText, bookTitle, boo
     setResult(null);
     setError(null);
     setHintsShown(false);
+    setMathCheck(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  const checkMathAnswer = useCallback(async () => {
+    if (!answer.trim() || !exercise?.expectedResult) return;
+    setMathCheck({ checking: true, pass: null, error: null });
+    try {
+      const { evaluate } = await import('mathjs');
+      const actual = evaluate(answer);
+      const expected = evaluate(exercise.expectedResult.valueExpr);
+      const tolerance = exercise.expectedResult.tolerance ?? 1e-6;
+      const pass = Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected));
+      setMathCheck({ checking: false, pass, error: null });
+    } catch {
+      setMathCheck({ checking: false, pass: null, error: 'Expression non reconnue.' });
+    }
+  }, [answer, exercise]);
 
   const submit = useCallback(async () => {
     if (!answer.trim() || phase === 'grading') return;
@@ -66,7 +89,7 @@ export default function OpenExercisePlayer({ exercises, pageText, bookTitle, boo
       const controller = new AbortController();
       abortRef.current = controller;
       const graded = await gradeExercise({
-        exercise, pageText, userAnswer: answer, bookTitle, bookAuthor, chapterName, signal: controller.signal,
+        exercise, pageText: exercisePageText, userAnswer: answer, bookTitle, bookAuthor, chapterName: exerciseChapterName, signal: controller.signal,
       });
       setResult(graded);
       setPhase('graded');
@@ -76,7 +99,7 @@ export default function OpenExercisePlayer({ exercises, pageText, bookTitle, boo
       setError(err.message || 'NETWORK');
       setPhase('error');
     }
-  }, [answer, phase, exercise, pageText, bookTitle, bookAuthor, chapterName]);
+  }, [answer, phase, exercise, exercisePageText, bookTitle, bookAuthor, exerciseChapterName]);
 
   const next = () => {
     scoreRef.current += VERDICT_WEIGHTS[result.verdict] ?? 0;
@@ -119,6 +142,24 @@ export default function OpenExercisePlayer({ exercises, pageText, bookTitle, boo
           disabled={phase === 'grading'}
           spellCheck={exercise.type !== 'code'}
         />
+      )}
+
+      {phase !== 'graded' && exercise.type === 'math' && exercise.expectedResult && (
+        <div className={styles.mathCheckRow}>
+          <button
+            type="button"
+            className={styles.hintBtn}
+            onClick={checkMathAnswer}
+            disabled={!answer.trim() || mathCheck?.checking}
+          >
+            {mathCheck?.checking ? 'Vérification…' : 'Vérifier'}
+          </button>
+          {mathCheck && !mathCheck.checking && (
+            <span className={mathCheck.error ? styles.mathCheckError : (mathCheck.pass ? styles.mathCheckPass : styles.mathCheckFail)}>
+              {mathCheck.error || (mathCheck.pass ? '✓ Correct' : '✗ Incorrect')}
+            </span>
+          )}
+        </div>
       )}
 
       {phase !== 'graded' && exercise.hints?.length > 0 && (

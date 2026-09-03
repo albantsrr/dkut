@@ -24,8 +24,8 @@ export async function getAllQuizProgress(bookId) {
 // explicit "Régénérer") — never to re-cache already-known questions — so
 // stats always start over rather than carrying forward the previous set's
 // score/attempts, which belonged to different questions.
-export async function saveQuizQuestions(bookId, chapterHref, mode, questions) {
-  await apiPutJson(`/books/${bookId}/quiz/${encodeURIComponent(chapterHref)}/${mode}`, { questions });
+export async function saveQuizQuestions(bookId, chapterHref, mode, questions, chapterLabel) {
+  await apiPutJson(`/books/${bookId}/quiz/${encodeURIComponent(chapterHref)}/${mode}`, { questions, chapterLabel });
 }
 
 // Called when a quiz playthrough reaches the summary screen.

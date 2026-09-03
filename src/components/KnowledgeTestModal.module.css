@@ -1,0 +1,194 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(5, 4, 3, 0.82);
+  backdrop-filter: blur(3px);
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal {
+  width: 100%;
+  max-width: 640px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-gold);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  color: var(--text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.headerLabel {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  opacity: 0.6;
+  padding: 0.2rem;
+  line-height: 1;
+}
+
+.closeBtn:hover {
+  opacity: 1;
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.centerState {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  text-align: center;
+  padding: 1.5rem 0;
+}
+
+.stateText {
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  opacity: 0.8;
+  max-width: 26rem;
+}
+
+.poolSize {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  color: var(--gold-light);
+}
+
+.countRow {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.countBtn,
+.countBtnActive {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  padding: 0.4rem 0.85rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.countBtn {
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-primary);
+  opacity: 0.65;
+}
+
+.countBtn:hover {
+  opacity: 1;
+}
+
+.countBtnActive {
+  border: 1px solid var(--gold);
+  background: var(--gold-faint);
+  color: var(--gold-light);
+}
+
+.startActions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.primaryBtn, .secondaryBtn {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.55rem 1.1rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  min-height: 36px;
+}
+
+.primaryBtn {
+  border: 1px solid var(--gold);
+  background: var(--gold-faint);
+  color: var(--gold-light);
+}
+
+.primaryBtn:hover {
+  background: rgba(200, 169, 110, 0.15);
+}
+
+.secondaryBtn {
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-primary);
+  opacity: 0.65;
+}
+
+.secondaryBtn:hover {
+  opacity: 1;
+}
+
+.loadingDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.scoreBig {
+  font-family: var(--font-display);
+  font-size: 2.6rem;
+  color: var(--gold-light);
+}
+
+.scoreMessage {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}

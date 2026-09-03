@@ -17,8 +17,8 @@ export async function getAllPomodoroStats() {
 // Called exactly once per cycle, when the end-of-cycle exercises reach the
 // summary screen — this is the only persistence point for the whole feature.
 // An interrupted cycle never calls this, so it leaves no trace by construction.
-export async function recordCompletedCycle(bookId, { durationMinutes, exercisesAnswered, exercisesCorrect }) {
-  await apiPostJson(`/pomodoro/${bookId}/cycle`, { durationMinutes, exercisesAnswered, exercisesCorrect });
+export async function recordCompletedCycle(bookId, { durationMinutes, exercisesAnswered, exercisesCorrect, exercises, chapterLabel }) {
+  await apiPostJson(`/pomodoro/${bookId}/cycle`, { durationMinutes, exercisesAnswered, exercisesCorrect, exercises, chapterLabel });
 }
 
 // No-op: nothing is cached in memory here anymore. Kept so AuthContext's

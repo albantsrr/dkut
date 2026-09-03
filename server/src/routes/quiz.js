@@ -14,6 +14,7 @@ function toEntry(row) {
     attempts: row.attempts,
     completed: row.completed,
     lastAttemptAt: row.last_attempt_at,
+    chapterLabel: row.chapter_label,
   };
 }
 
@@ -44,14 +45,15 @@ router.get('/books/:bookId/quiz/:chapterHref/:mode', requireAuth, async (req, re
 // Only ever called right after a fresh Gemini generation — always resets
 // stats to zero rather than carrying forward a previous question set's score.
 router.put('/books/:bookId/quiz/:chapterHref/:mode', requireAuth, async (req, res) => {
-  const { questions } = req.body ?? {};
+  const { questions, chapterLabel } = req.body ?? {};
   await pool.query(
-    `INSERT INTO quiz_progress (user_id, book_id, chapter_href, mode, questions_json, generated_at, best_score, total, attempts, completed, last_attempt_at)
-     VALUES ($1, $2, $3, $4, $5, now(), 0, $6, 0, false, NULL)
+    `INSERT INTO quiz_progress (user_id, book_id, chapter_href, mode, questions_json, generated_at, best_score, total, attempts, completed, last_attempt_at, chapter_label)
+     VALUES ($1, $2, $3, $4, $5, now(), 0, $6, 0, false, NULL, $7)
      ON CONFLICT (user_id, book_id, chapter_href, mode) DO UPDATE
        SET questions_json = EXCLUDED.questions_json, generated_at = now(),
-           best_score = 0, total = EXCLUDED.total, attempts = 0, completed = false, last_attempt_at = NULL`,
-    [req.userId, req.params.bookId, req.params.chapterHref, req.params.mode, JSON.stringify(questions), questions.length]
+           best_score = 0, total = EXCLUDED.total, attempts = 0, completed = false, last_attempt_at = NULL,
+           chapter_label = EXCLUDED.chapter_label`,
+    [req.userId, req.params.bookId, req.params.chapterHref, req.params.mode, JSON.stringify(questions), questions.length, chapterLabel ?? null]
   );
   res.status(204).end();
 });

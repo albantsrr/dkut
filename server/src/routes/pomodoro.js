@@ -33,8 +33,14 @@ router.get('/pomodoro/:bookId', requireAuth, async (req, res) => {
 
 // Called exactly once per completed cycle — an interrupted cycle never calls
 // this, so it leaves no trace by construction (see PomodoroModal.jsx).
+// In addition to the aggregate pomodoro_log upsert (unchanged), also persists
+// the cycle's actual generated exercises into pomodoro_exercises — previously
+// lost once PomodoroModal closed — so they can feed the "Tester ses
+// connaissances" practice pool (see practicePool.js). Two sequential writes,
+// not a transaction: losing the exercises insert on a rare failure while the
+// aggregate counters still land is an acceptable, non-corrupting degradation.
 router.post('/pomodoro/:bookId/cycle', requireAuth, async (req, res) => {
-  const { durationMinutes, exercisesAnswered, exercisesCorrect } = req.body ?? {};
+  const { durationMinutes, exercisesAnswered, exercisesCorrect, exercises, chapterLabel } = req.body ?? {};
   await pool.query(
     `INSERT INTO pomodoro_log (user_id, book_id, sessions_completed, total_minutes, exercises_answered, exercises_correct, first_session_at, last_session_at)
      VALUES ($1, $2, 1, $3, $4, $5, now(), now())
@@ -46,6 +52,13 @@ router.post('/pomodoro/:bookId/cycle', requireAuth, async (req, res) => {
        last_session_at = now()`,
     [req.userId, req.params.bookId, durationMinutes, exercisesAnswered, exercisesCorrect]
   );
+  if (Array.isArray(exercises) && exercises.length > 0) {
+    await pool.query(
+      `INSERT INTO pomodoro_exercises (user_id, book_id, chapter_label, questions_json)
+       VALUES ($1, $2, $3, $4)`,
+      [req.userId, req.params.bookId, chapterLabel ?? null, JSON.stringify(exercises)]
+    );
+  }
   res.status(204).end();
 });
 

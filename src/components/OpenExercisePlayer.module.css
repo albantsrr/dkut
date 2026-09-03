@@ -99,6 +99,24 @@
   border-color: var(--gold);
 }
 
+.mathCheckRow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.mathCheckPass,
+.mathCheckFail,
+.mathCheckError {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+}
+
+.mathCheckPass { color: #5fa86b; }
+.mathCheckFail { color: #e07070; }
+.mathCheckError { color: var(--text-secondary); }
+
 .hints {
   display: flex;
   flex-direction: column;

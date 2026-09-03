@@ -86,8 +86,10 @@ export default function PomodoroModal({ bookId, bookTitle, bookAuthor, cycleMinu
       durationMinutes: cycleMinutes,
       exercisesAnswered: questions.length,
       exercisesCorrect: finalScore,
+      exercises: questions,
+      chapterLabel: chapterName,
     }).catch(err => console.error('[PomodoroModal] record cycle error:', err));
-  }, [bookId, cycleMinutes, questions.length]);
+  }, [bookId, cycleMinutes, questions, chapterName]);
 
   const startBreak = useCallback(() => {
     breakEndAtRef.current = Date.now() + breakMinutes * 60_000;

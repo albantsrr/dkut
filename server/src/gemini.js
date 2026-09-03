@@ -373,6 +373,15 @@ const OPEN_EXERCISE_SCHEMA = {
           language: { type: SchemaType.STRING, description: 'Langage de programmation si type="code" (ex. "python"), chaîne vide sinon' },
           starterCode: { type: SchemaType.STRING, description: 'Squelette de départ optionnel si type="code" (peut être vide)' },
           expectedApproach: { type: SchemaType.STRING, description: 'Note interne, jamais montrée à l\'utilisateur : ce qu\'une bonne réponse doit couvrir, ancré dans le texte fourni — sert uniquement à la correction ultérieure' },
+          expectedResult: {
+            type: SchemaType.OBJECT,
+            description: 'Uniquement si type="math" ET l\'exercice a une valeur numérique finale unique et vérifiable (jamais pour une preuve ou une dérivation ouverte) — omis dans tous les autres cas',
+            properties: {
+              valueExpr: { type: SchemaType.STRING, description: 'La valeur attendue, sous forme d\'expression évaluable par mathjs (fractions, pi, e, opérateurs standards) — ex. "3/4", "2*pi"' },
+              tolerance: { type: SchemaType.NUMBER, description: 'Tolérance relative optionnelle pour la comparaison numérique (défaut 1e-6 si absente)' },
+            },
+            required: ['valueExpr'],
+          },
           hints: {
             type: SchemaType.ARRAY,
             items: { type: SchemaType.STRING },
@@ -393,6 +402,7 @@ const OPEN_EXERCISE_RULES = `Règles strictes :
 - Chaque "prompt" doit être ENTIÈREMENT AUTONOME : si l'exercice s'appuie sur une classe, fonction, formule ou exemple présenté plus tôt dans le chapitre, il DOIT être recopié intégralement dans "prompt" — le lecteur n'a que ce texte sous les yeux, pas le reste du chapitre.
 - Pour un exercice "code" : "language" indique le langage (ex. "python"), "starterCode" peut fournir un squelette ou une signature de départ (facultatif, laisser vide si non pertinent). Les identifiants et commentaires du code restent en anglais, conformément aux conventions Python standard.
 - "expectedApproach" (jamais affiché à l'utilisateur) doit décrire concrètement ce qu'une réponse correcte doit couvrir, en citant des éléments réellement présents dans le texte fourni — jamais une connaissance générique hors du texte. C'est ce qui servira de base à la correction.
+- Pour un exercice "math" : si (et seulement si) il a une valeur numérique finale unique et vérifiable (jamais pour une preuve, une dérivation ouverte ou une démonstration), remplis "expectedResult.valueExpr" avec cette valeur sous forme d'expression évaluable par mathjs (fractions, pi, e, opérateurs standards) — sinon omets entièrement ce champ, ne force jamais une valeur numérique sur un exercice qui n'en a pas.
 - "hints" : adapte le nombre et la précision des indices à la difficulté réelle de l'exercice — un exercice simple peut n'avoir qu'un seul indice bref, un exercice difficile 2 à 3 indices progressifs (du plus vague au plus précis). Un indice pointe vers la bonne direction (un concept à revoir, une piste de raisonnement) mais NE DOIT JAMAIS révéler la réponse elle-même ni le code/la formule finale.
 - Formatage impératif de tout code dans "prompt"/"hints" : plusieurs instructions liées entre elles vont dans UN SEUL bloc de code fencé (\`\`\`), jamais énumérées en prose séparées par des virgules. Un identifiant ou une expression isolée cité en ligne reste entre backticks simples (\`comme_ceci\`).
 ${ANTI_FABRICATION_RULES}`;
@@ -403,6 +413,20 @@ ${OPEN_EXERCISE_RULES}`;
 }
 
 const OPEN_EXERCISE_TYPES = new Set(['code', 'math', 'written']);
+
+// Same "normalize, never reject the whole exercise" philosophy as the hints
+// handling below — a malformed/missing expectedResult just means no
+// "Vérifier" button shows for that exercise, not that it's dropped.
+function validateExpectedResult(q) {
+  if (q.type !== 'math' || !q.expectedResult || typeof q.expectedResult.valueExpr !== 'string' || !q.expectedResult.valueExpr.trim()) {
+    return undefined;
+  }
+  const tolerance = Number(q.expectedResult.tolerance);
+  return {
+    valueExpr: q.expectedResult.valueExpr.trim(),
+    tolerance: Number.isFinite(tolerance) && tolerance > 0 ? tolerance : 1e-6,
+  };
+}
 
 // Same defensive philosophy as validateQuizQuestions — never trust the
 // structured output blindly. `hints` is normalized rather than a rejection
@@ -418,6 +442,7 @@ function validateOpenExercises(questions) {
     .map(q => ({
       ...q,
       hints: Array.isArray(q.hints) ? q.hints.filter(h => typeof h === 'string' && h.trim().length > 0) : [],
+      expectedResult: validateExpectedResult(q),
     }));
 }
 

@@ -10,6 +10,7 @@ import quizRouter from './routes/quiz.js';
 import pomodoroRouter from './routes/pomodoro.js';
 import pomodoroSettingsRouter from './routes/pomodoroSettings.js';
 import revisionSheetsRouter from './routes/revisionSheets.js';
+import practicePoolRouter from './routes/practicePool.js';
 import aiRouter from './routes/ai.js';
 
 for (const required of ['DATABASE_URL', 'GOOGLE_CLIENT_ID', 'SESSION_SECRET']) {
@@ -35,6 +36,7 @@ app.use(quizRouter);
 app.use(pomodoroRouter);
 app.use(pomodoroSettingsRouter);
 app.use(revisionSheetsRouter);
+app.use(practicePoolRouter);
 app.use(aiRouter);
 
 const port = process.env.PORT ?? 8787;

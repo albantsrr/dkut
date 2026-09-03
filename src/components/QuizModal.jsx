@@ -61,7 +61,7 @@ export default function QuizModal({ mode, bookId, chapterHref, chapterName, book
       const generated = await generateQuiz({
         mode, pageText, bookTitle, bookAuthor, chapterName, signal: controller.signal,
       });
-      await saveQuizQuestions(bookId, chapterHref, mode, generated);
+      await saveQuizQuestions(bookId, chapterHref, mode, generated, chapterName);
       const fresh = await getQuizProgress(bookId, chapterHref, mode);
       setQuestions(generated);
       setProgressEntry(fresh);
