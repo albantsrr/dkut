@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import TranslateBookModal from '../components/TranslateBookModal.jsx';
 import KnowledgeTestModal from '../components/KnowledgeTestModal.jsx';
 import ReadingModeModal from '../components/ReadingModeModal.jsx';
-import UserMenu from '../components/UserMenu.jsx';
+import NavBar from '../components/NavBar.jsx';
 import styles from './Library.module.css';
 
 const SPINE_COLORS = [
@@ -161,20 +161,13 @@ export default function Library() {
   }, []);
 
   return (
-    <div className={styles.page}>
+    <>
+      <NavBar user={user} onSignOut={signOut} />
+      <div className={styles.page}>
       {/* Header */}
       <header className={styles.header}>
-        <div className={styles.ornament}>✦</div>
-        <h1 className={styles.title}>Library</h1>
-        <p className={styles.subtitle}>personal reading archive</p>
-        <div className={styles.ornamentLine}>
-          <span />
-          <span className={styles.diamond}>◆</span>
-          <span />
-        </div>
-        <div className={styles.userBar}>
-          <UserMenu user={user} onSignOut={signOut} />
-        </div>
+        <h1 className={styles.title}>Bibliothèque</h1>
+        <p className={styles.subtitle}>archive de lecture personnelle</p>
       </header>
 
       {/* Upload Zone */}
@@ -187,7 +180,7 @@ export default function Library() {
         role="button"
         tabIndex={0}
         onKeyDown={(e) => e.key === 'Enter' && fileInputRef.current?.click()}
-        aria-label="Add an EPUB book"
+        aria-label="Ajouter un livre EPUB"
       >
         <svg className={styles.uploadBorder} xmlns="http://www.w3.org/2000/svg">
           <rect
@@ -219,9 +212,9 @@ export default function Library() {
               </svg>
             </div>
             <p className={styles.uploadLabel}>
-              Drop your <span>.epub</span> files here
+              Déposez vos fichiers <span>.epub</span> ici
             </p>
-            <p className={styles.uploadSub}>or click to browse</p>
+            <p className={styles.uploadSub}>ou cliquez pour parcourir</p>
           </div>
         )}
 
@@ -243,7 +236,7 @@ export default function Library() {
             <span className={styles.collectionLabel}>Collection</span>
             <span className={styles.collectionRule} />
             <span className={styles.collectionCount}>
-              {books.length} {books.length > 1 ? 'volumes' : 'volume'}
+              {books.length} volume{books.length > 1 ? 's' : ''}
             </span>
           </div>
 
@@ -264,7 +257,7 @@ export default function Library() {
                     tabIndex={0}
                     onKeyDown={(e) => e.key === 'Enter' && setChoosingBook(book)}
                     role="button"
-                    aria-label={`Read ${book.title}`}
+                    aria-label={`Lire ${book.title}`}
                   >
                     <div className={styles.bookCover}>
                       {book.cover ? (
@@ -294,17 +287,17 @@ export default function Library() {
                         {hasProgress ? (
                           <div className={styles.overlayActions}>
                             <span className={styles.readBtn}>
-                              {done ? 'Done ✓' : `Resume — ${pct}%`}
+                              {done ? 'Terminé ✓' : `Reprendre — ${pct}%`}
                             </span>
                             <button
                               className={styles.restartBtn}
                               onClick={(e) => handleRestart(e, book)}
                             >
-                              ↺ From beginning
+                              ↺ Depuis le début
                             </button>
                           </div>
                         ) : (
-                          <span className={styles.readBtn}>Read →</span>
+                          <span className={styles.readBtn}>Lire →</span>
                         )}
                       </div>
                     </div>
@@ -314,7 +307,7 @@ export default function Library() {
                       <p className={styles.bookAuthor}>{book.author}</p>
                       {hasProgress && (
                         <p className={styles.bookProgress}>
-                          {done ? 'Read' : `${pct}% read`}
+                          {done ? 'Lu' : `${pct}% lu`}
                         </p>
                       )}
                     </div>
@@ -322,10 +315,13 @@ export default function Library() {
                     <button
                       className={`${styles.deleteBtn} ${confirmDelete === book.id ? styles.deleteBtnConfirm : ''}`}
                       onClick={(e) => handleDelete(e, book.id)}
-                      title={confirmDelete === book.id ? 'Confirm deletion' : 'Delete'}
-                      aria-label="Delete this book"
+                      title={confirmDelete === book.id ? 'Confirmer la suppression' : 'Supprimer'}
+                      aria-label="Supprimer ce livre"
                     >
-                      {confirmDelete === book.id ? '✕ Confirm' : '✕'}
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M3 4h10M6.5 4V2.5h3V4M4.5 4l.6 9.5a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9L11.5 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      {confirmDelete === book.id && <span className={styles.confirmLabel}>Confirmer</span>}
                     </button>
 
                     {!book.translatedFrom && (
@@ -333,9 +329,12 @@ export default function Library() {
                         className={styles.translateBtn}
                         onClick={(e) => handleTranslateClick(e, book)}
                         title="Traduire ce livre"
-                        aria-label="Translate this book"
+                        aria-label="Traduire ce livre"
                       >
-                        ⇄
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M2 5h8M8 5 5.5 2.5M8 5 5.5 7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M14 11H6M8 11l2.5 2.5M8 11l2.5-2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
                       </button>
                     )}
 
@@ -343,9 +342,13 @@ export default function Library() {
                       className={styles.practiceBtn}
                       onClick={(e) => handlePracticeClick(e, book)}
                       title="Tester mes connaissances"
-                      aria-label="Test my knowledge on this book"
+                      aria-label="Tester mes connaissances sur ce livre"
                     >
-                      🎯
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3" />
+                        <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.3" />
+                        <circle cx="8" cy="8" r="0.9" fill="currentColor" />
+                      </svg>
                     </button>
                   </article>
                 );
@@ -356,17 +359,17 @@ export default function Library() {
 
       {fetchError && (
         <p className={styles.errorHint}>
-          Error: {fetchError}
+          Erreur : {fetchError}
         </p>
       )}
 
       {initialLoading && (
-        <p className={styles.emptyHint}>Loading your library…</p>
+        <p className={styles.emptyHint}>Chargement de votre bibliothèque…</p>
       )}
 
       {!initialLoading && !fetchError && books.length === 0 && !loading && (
         <p className={styles.emptyHint}>
-          Your collection is empty — add a book to get started.
+          Votre collection est vide — ajoutez un livre pour commencer.
         </p>
       )}
 
@@ -397,7 +400,7 @@ export default function Library() {
           onClose={() => setPracticeBook(null)}
         />
       )}
-
-    </div>
+      </div>
+    </>
   );
 }

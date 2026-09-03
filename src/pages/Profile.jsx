@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { getAllPomodoroStats } from '../lib/pomodoroLog.js';
 import { getPomodoroSettings, savePomodoroSettings } from '../lib/pomodoroSettings.js';
 import { getAllBooks } from '../utils/storage.js';
+import NavBar from '../components/NavBar.jsx';
 import styles from './Profile.module.css';
 
 function formatMinutes(totalMinutes) {
@@ -76,10 +77,10 @@ export default function Profile() {
   };
 
   return (
-    <div className={styles.page}>
+    <>
+      <NavBar user={user} onSignOut={signOut} />
+      <div className={styles.page}>
       <header className={styles.header}>
-        <button className={styles.backLink} onClick={() => navigate('/')}>← Library</button>
-        <div className={styles.ornament}>✦</div>
         <h1 className={styles.title}>Profil</h1>
         <p className={styles.subtitle}>compte, statistiques &amp; réglages</p>
       </header>
@@ -190,6 +191,7 @@ export default function Profile() {
       <footer className={styles.footer}>
         <span className={styles.footerOrnament}>✦</span>
       </footer>
-    </div>
+      </div>
+    </>
   );
 }

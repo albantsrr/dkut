@@ -1,0 +1,84 @@
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0 2rem;
+  background: rgba(13, 11, 9, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.brandMark {
+  font-size: 0.75rem;
+  color: var(--gold);
+}
+
+.brandName {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 1.15rem;
+  letter-spacing: 0.03em;
+  color: var(--gold-light);
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 0.5rem 0.75rem;
+  border-radius: 3px;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.link:hover {
+  color: var(--text-primary);
+  background: var(--gold-faint);
+}
+
+.linkActive {
+  color: var(--gold);
+}
+
+.spacer {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .bar {
+    gap: 1rem;
+    padding: 0 1rem;
+  }
+  .brandName {
+    display: none;
+  }
+  .link {
+    padding: 0.5rem 0.5rem;
+  }
+}
